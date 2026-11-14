@@ -49,7 +49,16 @@ cmd_stop() {
   for f in "$CHILD" "$PIDFILE"; do
     [ -f "$f" ] && kill "$(cat "$f" 2>/dev/null)" 2>/dev/null
   done
-  sleep 1
+  # 优雅退出等待 5 秒，仍未退出则强杀（避免僵尸守护）
+  _i=0
+  while [ $_i -lt 5 ]; do
+    running || break
+    sleep 1
+    _i=$((_i+1))
+  done
+  for f in "$CHILD" "$PIDFILE"; do
+    [ -f "$f" ] && kill -9 "$(cat "$f" 2>/dev/null)" 2>/dev/null
+  done
   log info "已停止"
   rm -f "$DATA/run/stop"
 }
