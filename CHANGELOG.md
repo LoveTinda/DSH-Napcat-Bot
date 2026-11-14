@@ -40,3 +40,7 @@
 ## v0.2.7
 - 接入 GitHub 远端（`LoveTinda/DSH-Napcat-Bot`，分支 `main`）
 - 22 端口不可用，`~/.ssh/config` 固定走 `ssh.github.com:443`
+
+## v0.2.8
+- 新增 `bin/napcat-install.sh`：离线优先安装 QQNT + NapCat 到独立容器
+- 新增 `docs/napcat-安装.md`：下载清单、安装、扫码、接入桥接器、两条禁令
