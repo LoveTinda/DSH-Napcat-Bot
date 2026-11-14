@@ -44,3 +44,7 @@
 ## v0.2.8
 - 新增 `bin/napcat-install.sh`：离线优先安装 QQNT + NapCat 到独立容器
 - 新增 `docs/napcat-安装.md`：下载清单、安装、扫码、接入桥接器、两条禁令
+
+## v0.2.9
+- 在本机构建 NapCat 独立容器（Ubuntu 24.04.4 arm64 + Node 24.22.1 + Qt 依赖 + 中文字体，717 MB）
+- 记录 chroot 构建方法：宿主 apt download + dpkg-deb -x，绕开 proot 下 dpkg 维护脚本失败
