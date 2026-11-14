@@ -1,5 +1,7 @@
 #!/system/bin/sh
 # 目的：以最小权限启动统一 Web 入口；有证书就走 HTTPS，没有就退回 HTTP。
+# 边界：只准备 token/证书并 exec，不实现代理逻辑。
+# 失败：缺 node 退出 78；证书生成失败则退回 HTTP 并在日志告警。
 # 安全：token 与私钥都从 secrets 读，不出现在命令行；没有 token 文件就生成一个。
 MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
 . "$MODDIR/bin/lib.sh"

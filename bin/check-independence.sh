@@ -1,5 +1,7 @@
 #!/system/bin/sh
 # 目的：把“独立”变成可执行检查，防止单元互相伸手。
+# 边界：静态检查，不修复；不解析 JS 语义。
+# 失败：有违规返回 1，供 pre-commit 拦截。
 # 检查：unit.conf 必需字段、是否存在跨单元路径引用、单元目录内是否有跨单元 import。
 MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
 UNITS=${UNITS:-$MODDIR/units}
