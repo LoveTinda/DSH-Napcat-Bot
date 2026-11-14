@@ -11,4 +11,6 @@ sleep 20
 
 mkdir -p "$DATA/logs"
 echo "$(date '+%Y-%m-%dT%H:%M:%S') [info] service.sh 拉起 supervisor" >> "$DATA/logs/supervisor.log"
+# 两个单元各自独立拉起；谁起不来都不影响另一个
+MODDIR="$MODDIR" sh "$MODDIR/bin/napcat.sh" start
 MODDIR="$MODDIR" sh "$MODDIR/bin/supervisor.sh" start
