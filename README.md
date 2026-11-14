@@ -24,6 +24,13 @@ originals/         只读原文件快照
 /data/adb/tinda-bot/repo.git git bare 仓库
 ```
 
+## 远端仓库
+
+`git@github.com:LoveTinda/DSH-Napcat-Bot.git`（分支 `main`）
+
+本机到 GitHub 的 22 端口被阻断，`~/.ssh/config` 里已把 `github.com` 映射到
+`ssh.github.com:443`，所以直接 `git push` 即可，不需要额外参数。
+
 ## Web 控制台
 
 `https://<局域网IP>:8443/`

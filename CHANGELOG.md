@@ -36,3 +36,7 @@
 ## v0.2.5
 - 导出 `tinda-ca.crt` 到 `/sdcard/Download/DSH-Go/`，供装进系统信任库
 - 新增 `WEB_HTTP_PORT`：证书装不上时的明文直连逃生口（默认关）
+
+## v0.2.7
+- 接入 GitHub 远端（`LoveTinda/DSH-Napcat-Bot`，分支 `main`）
+- 22 端口不可用，`~/.ssh/config` 固定走 `ssh.github.com:443`
