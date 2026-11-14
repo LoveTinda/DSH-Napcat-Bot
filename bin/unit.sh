@@ -45,7 +45,9 @@ do_start() {
     fails=0
     while :; do
       [ -f "$PID_FILE.stop" ] && break
-      spawn >> "$LOG_FILE" 2>&1
+      spawn >> "$LOG_FILE" 2>&1 &
+      echo $! > "$PID_FILE.child"
+      wait $!
       rc=$?
       [ -f "$PID_FILE.stop" ] && break
       fails=$((fails+1))
@@ -65,7 +67,8 @@ do_stop() {
   [ -f "$PID_FILE" ] && kill "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null
   i=0; while [ $i -lt 5 ]; do running || break; sleep 1; i=$((i+1)); done
   [ -f "$PID_FILE" ] && kill -9 "$(cat "$PID_FILE" 2>/dev/null)" 2>/dev/null
-  rm -f "$PID_FILE.stop" "$PID_FILE"
+  [ -f "$PID_FILE.child" ] && kill -9 "$(cat "$PID_FILE.child" 2>/dev/null)" 2>/dev/null
+  rm -f "$PID_FILE.stop" "$PID_FILE" "$PID_FILE.child"
   log info "$NAME 已停止"
 }
 

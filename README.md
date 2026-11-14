@@ -24,6 +24,15 @@ originals/         只读原文件快照
 /data/adb/tinda-bot/repo.git git bare 仓库
 ```
 
+## Web 控制台
+
+`https://<局域网IP>:8443/`
+
+- 首页是导航页，默认内嵌**桥接器**面板，可切到 DSH / NapCat
+- 首次打开会要求输入 token（`/data/adb/tinda-bot/secrets/web.token`）
+- 顶部三个状态灯来自 `/_/status`；下游没起来时对应灯是灰的
+- 明文 8088 会 301 跳到 8443
+
 ## 常用命令
 ```
 su -c 'sh /data/adb/modules/tinda-bot/bin/supervisor.sh start'

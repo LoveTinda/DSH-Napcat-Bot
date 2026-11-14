@@ -8,6 +8,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
+import path from 'node:path';
 import { URL } from 'node:url';
 
 const BIND = process.env.WEB_BIND || '127.0.0.1';
@@ -18,6 +19,25 @@ const UPSTREAMS = {
   '/bridge/': { host: '127.0.0.1', port: Number(process.env.BRIDGE_PANEL_PORT || 6702) },
   '/napcat/': { host: '127.0.0.1', port: Number(process.env.NAPCAT_WEBUI_PORT || 6099) },
 };
+
+/** 目的：给导航页返回三个下游的存活状态；超时也算离线，绝不抛未捕获异常。 */
+function probe(url) {
+  return new Promise((resolve) => {
+    const req = http.get(url, { timeout: 900 }, (r) => { r.resume(); resolve(r.statusCode < 500); });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+  });
+}
+
+async function probeAll(res) {
+  const out = {};
+  await Promise.all(Object.entries(UPSTREAMS).map(async ([k, v]) => {
+    const key = k.replace(/\//g, '');
+    out[key] = await probe(`http://${v.host}:${v.port}/`);
+  }));
+  res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(out));
+}
 
 const LANDING = `<!doctype html><meta charset="utf-8"><title>Tinda</title>
 <style>body{font:16px system-ui;margin:2rem;background:#0f1115;color:#ddd}a{color:#7cc4ff;display:block;margin:.6rem 0}</style>
@@ -42,19 +62,35 @@ const useTls = !!(TLS_CERT && TLS_KEY && fs.existsSync(TLS_CERT) && fs.existsSyn
 function handler(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  // 1) 健康检查：不鉴权，只回 ok
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' });
     return res.end('ok');
   }
-  if (!authed(req, url)) {
-    res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' });
-    return res.end('需要 token：在地址后加 ?k=<WEB_TOKEN>');
-  }
-  if (url.pathname === '/' || url.pathname === '/index.html') {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': `tinda=${TOKEN}; Path=/; HttpOnly; SameSite=Strict` });
+
+  // 2) 导航页本身不鉴权（它内含 token 引导）；不鉴权意味着不能泄露任何下游数据
+  if (url.pathname === '/' || url.pathname === '/index.html' || url.pathname.startsWith('/ui/')) {
+    const ui = path.join(import.meta.dirname, 'ui', 'index.html');
+    if (fs.existsSync(ui)) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return fs.createReadStream(ui).pipe(res);
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     return res.end(LANDING);
   }
 
+  // 3) 其余一律要 token
+  if (!authed(req, url)) {
+    res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' });
+    return res.end('需要 token：首次打开在页面里输入，或地址后加 ?k=<WEB_TOKEN>');
+  }
+
+  // 4) 状态接口：导航页的点亮/熄灭靠它
+  if (url.pathname === '/_/status') {
+    return probeAll(res);
+  }
+
+  // 5) 反代
   const prefix = Object.keys(UPSTREAMS).find((p) => url.pathname.startsWith(p));
   if (!prefix) { res.writeHead(404); return res.end('not found'); }
 

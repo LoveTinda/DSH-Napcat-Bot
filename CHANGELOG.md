@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## v0.2.4
+- 新增统一导航页 `units/web/ui/index.html`：默认内嵌桥接面板，左侧切换 DSH / NapCat
+- 首次打开显示 token 引导（不需要带 ?k= 参数先看页面）
+- 顶部三个状态灯，数据来自 `/_/status`（900ms 超时即判离线）
+- 修复：`unit.sh` 只杀子 shell 不杀真正子进程，导致端口被旧进程占住
+
 ## v0.2.2
 - 整改：按 `docs/编码规范.md` 自查，补齐缺失的头注释（边界/失败）
 - 新增 `docs/adr/0003-web入口与https.md`、本文件
