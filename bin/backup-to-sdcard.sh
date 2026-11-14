@@ -26,7 +26,7 @@ rm -rf "$DEST/.runtime" 2>/dev/null
 COUNT=$(find "$DEST" -type f | wc -l | tr -d ' ')
 if [ "$COUNT" -eq 0 ]; then rm -rf "$DEST"; echo "FAIL 备份为空，已回滚"; exit 1; fi
 
-( cd "$DEST" && find . -type f ! -name SHA256SUMS -exec sha256sum {} + 2>/dev/null | sort > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS )
+( cd "$DEST" && find . -type f ! -name SHA256SUMS -print0 | xargs -0 sha256sum 2>/dev/null | sort > "$DEST_ROOT/.sums.$$" && mv "$DEST_ROOT/.sums.$$" SHA256SUMS )
 
 {
   echo "## $(date '+%Y-%m-%d %H:%M:%S') — $VER"
