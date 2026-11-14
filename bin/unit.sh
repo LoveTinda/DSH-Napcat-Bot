@@ -42,7 +42,6 @@ do_start() {
   if running; then log info "$NAME 已在运行 pid=$(cat "$PID_FILE")"; return 0; fi
   log info "$NAME 启动"
   (
-    echo $$ > "$PID_FILE"
     fails=0
     while :; do
       [ -f "$PID_FILE.stop" ] && break
@@ -56,6 +55,7 @@ do_start() {
     done
     rm -f "$PID_FILE"
   ) >/dev/null 2>&1 &
+  echo $! > "$PID_FILE"
   sleep 1
   running && log info "$NAME 已启动 pid=$(cat "$PID_FILE")" || log warn "$NAME 未确认运行，见 $LOG_FILE"
 }
