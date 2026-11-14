@@ -118,6 +118,14 @@ server.listen(PORT, BIND, () => {
   console.log(`[web] listening ${useTls ? 'https' : 'http'}://${BIND}:${PORT} token=${TOKEN ? 'on' : 'off'} upstreams=${Object.keys(UPSTREAMS).join(',')}`);
 });
 
+// 可选：明文直连端口（调试/证书装不上时用；默认不开）
+const PLAIN_PORT = Number(process.env.WEB_HTTP_PORT || 0);
+if (PLAIN_PORT && PLAIN_PORT !== PORT) {
+  http.createServer(handler).listen(PLAIN_PORT, BIND, () => {
+    console.log(`[web] plain http:${PLAIN_PORT} (未加密，仅调试用)`);
+  });
+}
+
 // 可选：明文端口只做 301 跳转（不承载任何内容）
 const REDIRECT_PORT = Number(process.env.WEB_REDIRECT_PORT || 0);
 if (useTls && REDIRECT_PORT) {

@@ -32,3 +32,7 @@
 
 ## v0.1.0
 - P0 骨架：Magisk 模块、supervisor、snapshot、autocommit
+
+## v0.2.5
+- 导出 `tinda-ca.crt` 到 `/sdcard/Download/DSH-Go/`，供装进系统信任库
+- 新增 `WEB_HTTP_PORT`：证书装不上时的明文直连逃生口（默认关）
