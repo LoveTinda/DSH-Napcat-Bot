@@ -1,0 +1,10 @@
+# 目的：模块级配置。真正的 /data/adb/tinda-bot/etc/tinda.conf 不入库。
+# 所有键都要在 docs/配置说明.md 里有一行说明（pre-commit 会查）。
+
+PORT_MODE=unix            # unix | tcp（默认 unix；tcp 会暴露端口，不推荐）
+SOCKET_PATH=/data/adb/tinda-bot/run/bridge.sock
+LOG_DIR=/data/adb/tinda-bot/logs
+STATE_DIR=/data/adb/tinda-bot/state
+SECRETS_DIR=/data/adb/tinda-bot/secrets
+LOG_MAX_MB=50
+RESTART_BACKOFF_MAX=60
