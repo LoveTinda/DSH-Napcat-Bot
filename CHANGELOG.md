@@ -48,3 +48,6 @@
 ## v0.2.9
 - 在本机构建 NapCat 独立容器（Ubuntu 24.04.4 arm64 + Node 24.22.1 + Qt 依赖 + 中文字体，717 MB）
 - 记录 chroot 构建方法：宿主 apt download + dpkg-deb -x，绕开 proot 下 dpkg 维护脚本失败
+
+## v0.2.10
+- 明确 NapCat 是外部依赖：模块只负责拉起容器与探活，不管理登录/配置/版本
