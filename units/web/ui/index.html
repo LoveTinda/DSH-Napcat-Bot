@@ -81,6 +81,15 @@ function switchTo(k){
   off.classList.add('hide');
 }
 
+// 支持直达某个面板：?p=napcat 或 #napcat
+(function deepLink(){
+  const q = new URLSearchParams(location.search).get('p');
+  const want = (q || location.hash.replace(/^#/, '')).toLowerCase();
+  if (!KEYS[want]) return;
+  const btn = document.querySelector(`nav button[data-k="${want}"]`);
+  if (btn) btn.click();
+})();
+
 view.addEventListener('load', ()=>{ off.classList.add('hide'); });
 // 下游 502 时 iframe 会显示错误页，这里用状态接口兜底提示
 setInterval(refresh, 4000);
