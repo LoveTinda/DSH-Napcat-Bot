@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v0.2.13
+- 桥接器补回网页面板 `units/bridge/panel.mjs`：概览（后端/运行时长/收到/成功/失败/排队）、
+  会话表（chatKey → DSH 会话 id、条数、最近、耗时、是否在处理）、事件流（最近 100 条元信息）、只读配置
+- 事件流只记「哪个聊天、多久、成没成」，不记聊天正文；配置里的 token 只显示「已设置/未设置」
+- 面板用相对路径取状态（`panel/state.json`），挂在 `/bridge/` 前缀下面也不会失效
+- 新增自测 `units/bridge/test-panel.mjs`（16 项，假 OneBot + echo 后端，不碰生产实例）
+
 ## v0.2.12
 - 三个面板各自独立端口：`WEB_DSH_ORIGIN_PORT`（默认 8444）、`WEB_NAPCAT_ORIGIN_PORT`（默认 8445），
   根路径直通下游。DSH 与 NapCat 的前端都写死绝对路径（`/webui/assets`、`/api/…`），挤在 8443 的前缀

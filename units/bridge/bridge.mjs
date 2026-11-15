@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { renderPanel } from './panel.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -30,6 +31,53 @@ const port = Number(portText || 6700);
 function log(...a) {
   const ts = new Date().toISOString();
   console.log(ts, ...a);
+}
+
+// ---------- 面板用的统计 ----------
+const startedAt = Date.now();
+const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0 };
+const events = [];               // 最近 100 条处理结果，只放元信息，不放聊天内容
+const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
+
+/** 目的：记一条事件并裁剪到 100 条；任何异常都不许影响主流程。 */
+function record(status, key, ms, note) {
+  try {
+    events.unshift({ at: Date.now(), status, key, ms, note: String(note || '').slice(0, 120) });
+    if (events.length > 100) events.length = 100;
+  } catch { /* 统计失败不影响业务 */ }
+}
+
+/** 目的：给面板一份只读快照；不含聊天内容，配置里的 token 一律不出现在这里。 */
+function snapshot() {
+  // 会话表取「已落盘会话」和「有统计的聊天」的并集：
+  // echo 后端或 DSH 没回 session id 时，聊天也得在面板里露出来，否则看着像没收到。
+  const keys = new Set([...Object.keys(sessions), ...chatStats.keys()]);
+  const sessionsView = [...keys].map((key) => {
+    const st = chatStats.get(key) || {};
+    return { key, sessionId: sessions[key] || '', messages: st.messages || 0, lastAt: st.lastAt || 0, lastMs: st.lastMs || 0, busy: queues.has(key) };
+  }).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  return {
+    ok: true,
+    backend: cfg.backend,
+    listen: cfg.listen,
+    napcatApi: cfg.napcatApi,
+    uptimeMs: Date.now() - startedAt,
+    counts: { ...counts, busy: queues.size },
+    sessions: sessionsView,
+    events: events.slice(0, 50),
+    config: {
+      BRIDGE_LISTEN: cfg.listen,
+      BRIDGE_BACKEND: cfg.backend,
+      BRIDGE_ALLOW_GROUP: cfg.allowGroup,
+      BRIDGE_TIMEOUT_MS: cfg.timeoutMs,
+      BRIDGE_PERMISSION_MODE: cfg.permissionMode || '(profile 默认)',
+      NAPCAT_API: cfg.napcatApi,
+      NAPCAT_TOKEN: cfg.napcatToken ? '(已设置)' : '(未设置)',
+      DSH_BIN: cfg.dshBin,
+      DSH_HOME: cfg.dshHome || process.env.HOME || '',
+      BRIDGE_STATE_FILE: cfg.stateFile || '(不落盘)',
+    },
+  };
 }
 
 // ---------- 会话映射 ----------
@@ -179,19 +227,21 @@ const server = http.createServer(async (req, res) => {
   const url = req.url || '/';
   // 用 pathname 判断，查询串（例如网关带过来的 ?k=）不能影响路由
   const pathname = new URL(url, 'http://127.0.0.1').pathname;
+  // 面板：页面和它的状态接口都不走鉴权——鉴权由外面的网关做，这里只监听 127.0.0.1
+  if (req.method === 'GET' && (pathname === '/panel' || pathname === '/panel/' || pathname === '/index.html')) {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(renderPanel(snapshot()));
+  }
+  if (req.method === 'GET' && pathname === '/panel/state.json') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(JSON.stringify(snapshot()));
+  }
+
   if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/')) {
     const wantsHtml = String(req.headers.accept || '').includes('text/html');
     if (pathname === '/' && wantsHtml) {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(`<!doctype html><meta charset="utf-8"><title>桥接器</title>
-<style>body{font:14px/1.6 system-ui,sans-serif;margin:0;padding:24px;background:#0f1115;color:#e6e6e6}
-b{color:#7dd3fc}code{background:#1b1f27;padding:2px 6px;border-radius:4px}</style>
-<h3>桥接器 · 运行中</h3>
-<p>后端：<b>${cfg.backend}</b></p>
-<p>监听：<code>${cfg.listen}</code></p>
-<p>上游 NapCat：<code>${cfg.napcatApi}</code></p>
-<p style="opacity:.6">会话按聊天隔离；消息进来时这里会打印处理结果（见 logs/bridge.log）。</p>`);
-      return;
+      return res.end(renderPanel(snapshot()));
     }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, backend: cfg.backend, listen: cfg.listen }));
@@ -208,15 +258,26 @@ b{color:#7dd3fc}code{background:#1b1f27;padding:2px 6px;border-radius:4px}</styl
   res.writeHead(204).end();
 
   const info = eventInfo(ev);
-  if (!info) return;
+  if (!info) { counts.skipped++; return; }
+  counts.incoming++;
   enqueue(info.key, async () => {
     const started = Date.now();
     try {
       const { text } = await askDsh(info);
       const reply = (text || '').trim() || '（DSH 没有返回内容）';
       await sendReply(info, reply.slice(0, 4000));
-      log('ok', info.kind, info.key, `${Date.now() - started}ms`, reply.length + '字');
+      const ms = Date.now() - started;
+      counts.ok++;
+      const st = chatStats.get(info.key) || { messages: 0 };
+      chatStats.set(info.key, { messages: st.messages + 1, lastAt: Date.now(), lastMs: ms });
+      record('ok', info.key, ms, reply.length + ' 字');
+      log('ok', info.kind, info.key, `${ms}ms`, reply.length + '字');
     } catch (e) {
+      const ms = Date.now() - started;
+      counts.failed++;
+      const st = chatStats.get(info.key) || { messages: 0 };
+      chatStats.set(info.key, { messages: st.messages, lastAt: Date.now(), lastMs: ms });
+      record('fail', info.key, ms, e.message);
       log('fail', info.kind, info.key, e.message);
       try { await sendReply(info, `出错了：${String(e.message).slice(0, 200)}`); } catch (e2) { log('fail:reply', e2.message); }
     }
