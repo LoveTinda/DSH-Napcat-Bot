@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v0.2.14
+- 接通 NapCat 的 OneBot 11：`bin/napcat-wire-onebot.sh` 写 `httpServers`（127.0.0.1:3001，带 token）
+  和 `httpClients`（事件推送到桥接器 6700），token 落在 `$DATA/secrets/napcat.token`（0600）
+- 新增 `bin/napcat-start-host.sh`：Xvfb + QQ 主进程 + launcher 注入，一个入口把 NapCat 拉起来
+- QQ launcher 支持快速登录：自动从 `onebot11_<uin>.json` 取账号补 `-q <uin>`，
+  重启 NapCat 不用重新扫码
+- headless 后端接上 App 的账号登录态：headless profile 默认关掉了交互式凭据库与账号插件
+  （上游假设一次性任务用启动时给的 API key），本机没有 API key，所以在
+  `$DSH_HOME/profiles/headless/cordis.patch.yml` 里重新打开并把默认模型指到 `deepseek-account`
+
 ## v0.2.13
 - 桥接器补回网页面板 `units/bridge/panel.mjs`：概览（后端/运行时长/收到/成功/失败/排队）、
   会话表（chatKey → DSH 会话 id、条数、最近、耗时、是否在处理）、事件流（最近 100 条元信息）、只读配置
