@@ -17,11 +17,25 @@ DEST="$DEST_ROOT/tinda-bot-$VER-$TS"
 [ -d "$DEST_ROOT" ] || mkdir -p "$DEST_ROOT" || { echo "FAIL 无法创建 $DEST_ROOT"; exit 78; }
 [ -w "$DEST_ROOT" ] || { echo "FAIL $DEST_ROOT 不可写"; exit 78; }
 
+# 先把 git 的散对象收紧：不收紧的话每提交一次就多几十个文件，
+# 备份里的「681 个文件」有一大半是 .git/objects 的小碎片。
+if [ -d "$MODDIR/.git" ] && command -v git >/dev/null 2>&1; then
+  git -C "$MODDIR" gc --quiet --prune=now 2>/dev/null || true
+fi
+
 mkdir -p "$DEST"
 # 完整拷贝：脚本、文档、契约、originals、.git 全要（.runtime 是临时运行态，排除）
+# .runtime 里有 700MB 的 NapCat rootfs 和 secrets，绝不能进备份。
 tar cf - -C "$MODDIR" --exclude=./.runtime . 2>/dev/null | tar xf - -C "$DEST" 2>/dev/null || \
   cp -a "$MODDIR"/. "$DEST"/ 2>/dev/null || true
 rm -rf "$DEST/.runtime" 2>/dev/null
+
+# 再补一个单文件 bundle：/sdcard 是 FUSE 挂载，直接把 .git 拿回来 clone 会被
+# "dubious ownership" 挡住；bundle 没有这个问题，一条 git clone 就能还原历史。
+if [ -d "$MODDIR/.git" ] && command -v git >/dev/null 2>&1; then
+  git -C "$MODDIR" bundle create "$DEST/repo.bundle" --all 2>/dev/null \
+    && echo "   repo.bundle 已生成（恢复：git clone repo.bundle <目录>）"
+fi
 
 COUNT=$(find "$DEST" -type f | wc -l | tr -d ' ')
 if [ "$COUNT" -eq 0 ]; then rm -rf "$DEST"; echo "FAIL 备份为空，已回滚"; exit 1; fi

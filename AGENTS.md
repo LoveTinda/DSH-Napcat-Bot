@@ -73,7 +73,7 @@
 
 | 位置 | 内容 | 规则 |
 | --- | --- | --- |
-| `app/` | 桥接器源码（git worktree） | 只放能跑的代码 |
+| `units/` | 各单元实现（napcat / bridge / web / dsh） | 只放能跑的代码；单元之间不互相 import |
 | `bin/` | 模块自身的可执行脚本 | Android sh，禁 bashism |
 | `etc/` | 配置模板 | `.example` 结尾，真配置不入库 |
 | `docs/` | 规范、架构、ADR、命令表规格 | 变更必须同提交 |
@@ -123,13 +123,13 @@ bin/snapshot.sh <原因>
 - 魔法数：阈值必须具名，并写清“为什么是这个数”
 - 往 `/sdcard` 写可执行文件或放代码（会被全局扫描，且共享存储不可信）
 - 模块进程注入别的进程（Zygisk/ptrace/LD_PRELOAD）——见 ADR-0001
-- 在 root 域里监听 TCP 端口：一律 Unix socket
+- 对外监听非回环端口（例外：控制台 8443 必须对外，且必须带 token；此例外见 `docs/安全模型.md`）
 - 改代码不改文档：pre-commit 会检查 `docs/` 是否同提交
 
 ## 9. 文档同步检查（pre-commit）
 
 钩子做四件事：
 1. 所有 `.js` 过 `node --check`（有 node 时）
-2. 改了 `app/**` 但没改 `docs/**` → 警告并要求确认
+2. 改了 `units/**` 或 `bin/**` 但没改 `docs/**` → 警告并要求确认
 3. 配置文件里的键，必须在 `docs/配置说明.md` 出现
 4. 更新 `CHANGELOG.md`

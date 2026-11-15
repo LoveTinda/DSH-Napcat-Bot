@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v0.2.17
+- 备份瘦身与可恢复：备份前 `git gc`，`.git` 从 404 个散对象文件降到 31 个
+  （一次备份 681 → 322 个文件）；额外生成单文件 `repo.bundle`（220KB），
+  `/sdcard` 的 FUSE 挂载会让 `git` 报 dubious ownership，bundle 不受影响，`git clone` 即可还原
+- `RUNBOOK.md` 新增 §8.5：备份到底由什么组成（历史和快照占大头）、两种恢复方式（已实测）
+- `AGENTS.md` 两条规则改成现行做法：源码目录 `app/` → `units/`；
+  「一律 Unix socket」与实际（回环 TCP + 对外 8443 带 token）不符，改成带例外的表述
+
 ## v0.2.16
 - 两份文档改成通用文件名，放仓库根：
   `docs/编码规范.md` → `AGENTS.md`（AI 工具和人都先读这个），

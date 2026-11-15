@@ -208,6 +208,34 @@ OK /sdcard/backup/tinda-bot-v0.2.14-20261115-143417
    629 个文件，5.5M
 ```
 
+## 8.5 备份组成与恢复
+
+每次更新后的备份目录长这样（数字是实测值）：
+
+| 部分 | 文件数 | 是什么 |
+| --- | --- | --- |
+| `.git/` | ~31（gc 后） | git 历史；不 gc 会有 400+ 个散对象小文件 |
+| `originals/` | 219 | 10 份原文件快照，只读，永不改 |
+| 真正项目文件 | ~60 | 脚本、单元、文档、契约 |
+| `repo.bundle` | 1 | 单文件仓库快照，220KB |
+| `SHA256SUMS` | 1 | 校验和 |
+
+所以「备份有几百个文件」不代表项目变胖了，**大头是历史和快照**。
+`.runtime/`（含 700MB 的 NapCat rootfs 与 secrets）永远不进备份。
+
+恢复两种方式：
+
+```sh
+# 方式一：整目录已经在，直接用（/sdcard 是 FUSE 挂载，git 会报 dubious ownership）
+git config --global --add safe.directory /sdcard/backup/tinda-bot-<版本>-<时间>
+cd /sdcard/backup/tinda-bot-<版本>-<时间> && git status
+
+# 方式二：从单文件 bundle 还原（不受 ownership 限制，推荐）
+git clone /sdcard/backup/tinda-bot-<版本>-<时间>/repo.bundle ~/tinda-restored
+```
+
+方式二实测：`git clone` 出 194 个文件、最后一条提交正确。
+
 ## 9. 排障对照表
 
 | 现象 | 先看这里 | 常见原因 |
