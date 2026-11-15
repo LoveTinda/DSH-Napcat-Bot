@@ -82,5 +82,16 @@ if [ -f "$NAPCAT_WEBUI_JSON" ]; then
   [ -n "$_napcat_token" ] && export NAPCAT_WEBUI_TOKEN="$_napcat_token"
 fi
 
-log info "启动网关 cert=$([ -f "$CERT" ] && echo on || echo off) port=$WEB_PORT bridge=:$BRIDGE_PANEL_PORT"
-exec "$NODE" "$MODDIR/units/web/gateway.mjs"
+# 资源上限（T-4）：网关只做转发，堆不需要大；上限防异常响应把手机内存吃光。
+HEAP="$(conf_get WEB_HEAP_MB 192)"
+case "$HEAP" in ''|*[!0-9]*) HEAP=192 ;; esac
+[ "$HEAP" -lt 64 ] && HEAP=64
+[ "$HEAP" -gt 2048 ] && HEAP=2048
+
+# fd 上限（T-4）：node 的文件/套接字句柄数量有上限，先抬到配置值；抬不上去就保留系统值并告警。
+FDS="$(conf_get UNIT_MAX_OPEN_FILES 4096)"
+case "$FDS" in ''|*[!0-9]*) FDS=4096 ;; esac
+ulimit -n "$FDS" 2>/dev/null || log warn "fd 上限抬到 $FDS 失败，继续用系统值"
+
+log info "启动网关 cert=$([ -f "$CERT" ] && echo on || echo off) port=$WEB_PORT bridge=:$BRIDGE_PANEL_PORT heap=${HEAP}MB"
+exec "$NODE" --max-old-space-size="$HEAP" "$MODDIR/units/web/gateway.mjs"

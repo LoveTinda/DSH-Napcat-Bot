@@ -12,6 +12,10 @@ ensure_dirs
 
 reason=$1
 [ -n "$reason" ] || reason=manual
+# 原因会被拼进目录名：斜杠会让快照嵌进多层子目录（INDEX 里的路径也跟着错），空白会让路径难引用。
+# 只做最小替换，保留中文；控制字符与 shell 元字符直接去掉。
+reason=$(printf '%s' "$reason" | tr '/\\ ' '---' | tr -cd 'A-Za-z0-9._-\200-\377')
+[ -n "$reason" ] || reason=manual
 stamp=$(date '+%Y%m%d-%H%M%S')
 dest="$MODDIR/originals/$stamp-$reason"
 mkdir -p "$dest" || { echo "FAIL 无法创建 $dest"; exit 78; }

@@ -19,7 +19,10 @@
 ## 0.5 接口与本地优化必须分离
 
 契约进 `contracts/`（入 git），设备/账号特化进 `local/`（**不入 git**），两边的边界见 `docs/接口与适配.md`。
-提交前必须跑 `bin/check-contracts.sh`。
+提交前必须跑 `bin/check-contracts.sh` 与 `bin/check-deps.sh`。
+
+依赖只有一种允许的形态：`node:` 内置模块 + 相对路径。要加第三方依赖必须先写 ADR，
+并同时改 `bin/check-deps.mjs` 的白名单——不能为了"先跑起来"绕开门禁。
 
 ## 0.6 每次更新必须落地一份完整备份
 
@@ -131,14 +134,15 @@ bin/snapshot.sh <原因>
 
 ## 9. 文档同步检查（门禁）
 
-可执行的门禁（`bin/install-hooks.sh` 能把前三项装成 pre-commit）：
+可执行的门禁（`bin/install-hooks.sh` 能把前四项装成 pre-commit）：
 1. 所有 `.js`/`.mjs` 过 `node --check`（有 node 时）
 2. 所有源码文件头必须有 目的/边界/依赖/失败 四项（`check-headers.sh`）
-3. 单元之间不得互相引用（`check-independence.sh`）；契约与实现一致性（`check-contracts.sh`，当前如实告警）
+3. 单元之间不得互相引用（`check-independence.sh`）；零第三方依赖（`check-deps.sh`）；
+   契约与实现一致性（`check-contracts.sh`，当前如实告警）
 
 仍需人工确认的：
 4. 配置文件里的键，必须在 `docs/配置说明.md` 出现
 5. 更新 `CHANGELOG.md`
 6. 改 `units/**`/`bin/**` 时同提交改 `docs/**`
 
-钩子不在 git 里，换机器要跑一次 `sh bin/install-hooks.sh`；没装时这三道要手动跑。
+钩子不在 git 里，换机器要跑一次 `sh bin/install-hooks.sh`；没装时这几道要手动跑。

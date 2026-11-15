@@ -201,6 +201,10 @@ DSH 那格显示一页说明而不是空白：它的网页端有一把每次启�
 面板不做写操作：改 `BRIDGE_BACKEND` 等配置请编辑 `$DATA/etc/tinda.conf`，再
 `sh bin/unit.sh restart bridge`。
 
+概览里的「待补发」和「告警接收」是这一段新加的两块：前者是发不出去、等网络恢复的回复条数
+（来源 `state/bridge/outbox.json`，面板不提供重发/删除按钮）；后者显示打码后的 `ALERT_QQ`
+与已发告警条数，没配时显示「未设置」，此时连续失败/磁盘告警都不会发。
+
 ## 8. 改完代码必须做的事
 
 ```sh
@@ -264,6 +268,10 @@ git clone /sdcard/backup/tinda-bot-<版本>-<时间>/repo.bundle ~/tinda-restore
 | QQ 掉线 | `unit.sh logs napcat` 有没有「快速登录」 | 没注入 `-q`，退化成扫码 |
 | 桥接器收到不回复 | `logs bridge` | DSH 报 `MISSING_CREDENTIAL` / `ACCOUNT_SIGN_IN_REQUIRED`，查配置说明 §8 的 patch |
 | 回复发不出去 | `3001/get_status` | `httpServers` 没开，或 `secrets/napcat.token` 和 NapCat 里写的不一致 |
+| 回复晚了 / 事后才到 | 面板概览的「待补发」 | 3001 抖过：桥接器已把回复放进 `state/bridge/outbox.json`，恢复后按 `BRIDGE_SEND_DRAIN_MS` 补发；看事件里的「补发成功」 |
+| 一个问题收到两条回答 | 面板事件的「重复推送」 | NapCat 超时重推；同 `message_id` 已被去重。仍重复说明事件里没有 `message_id`，查 NapCat 的 `messagePostFormat` |
+| 手机没收到告警 | `grep ^ALERT_QQ .runtime/etc/tinda.conf` | 空 = 关；或同类告警还在 `ALERT_COOLDOWN_SEC` 冷却窗口里（面板「告警接收」会显示被压次数） |
+| 待补发一直不降 | `unit.sh logs bridge 40` 里 `fail:send` | 3001 一直连不上；先修 NapCat，再等轮询。过期（`BRIDGE_OUTBOX_TTL_MS`）会自动丢弃并记事件 |
 | 起了两个同样的进程 | `doctor.sh` 端口项 | 旧实例没停干净；`unit.sh stop` 只认自己 pid，手起的要先手动 kill |
 
 ## 10. 硬性约束

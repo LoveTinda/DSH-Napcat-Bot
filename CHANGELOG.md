@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v0.2.19
+- **T-4 资源上限**：桥接器/网关按配置设 V8 堆上限（`BRIDGE_HEAP_MB=256` / `WEB_HEAP_MB=192`，
+  夹在 64–2048），node 单元 fd 软上限 `UNIT_MAX_OPEN_FILES=4096`；`doctor.sh` 新增
+  「资源与依赖」段，直接读 `/proc/<pid>/cmdline` 与 `limits` 核对「实际生效」，
+  而不是看配置里写了什么（PID 文件里是看守 shell，不是 node，这一点也一并修了）
+- **T-8 断网补发 + 去重**：回复发不出去先原地退避重试（`BRIDGE_SEND_RETRY`），仍失败进
+  `$DATA/state/bridge/outbox.json`（0600、最多 100 条、`BRIDGE_OUTBOX_TTL_MS` 过期丢弃），
+  恢复后按 `BRIDGE_SEND_DRAIN_MS` 自动补发；NapCat 重推同一 `message_id` 只回答一次（窗口 500 条）
+- **O-4 告警**：连续失败（`ALERT_FAIL_STREAK`）与磁盘占用（`DISK_ALERT_PERCENT`）可推到
+  `ALERT_QQ` 私聊，同一类按 `ALERT_COOLDOWN_SEC` 节流；判定抽到 `units/bridge/alerts.mjs`，
+  面板显示「已发/被压/最近一次」，`doctor.sh` 也报数据分区占用
+- **S-9 依赖锁定**：新增 `bin/check-deps.mjs` + `bin/check-deps.sh`，只允许 `node:` 内置与
+  相对路径；出现 `node_modules` / `dependencies` / 裸模块名即失败，已装进 pre-commit 与
+  `doctor.sh`。本仓库零第三方依赖，因此没有 lockfile 与 `npm audit` 可做（没有依赖可审计）
+- **面板**：概览新增「待补发」卡片与告警/磁盘信息行；配置新增「回发与告警」组；
+  事件流记录「回复已入补发队列」「补发成功 / 超时丢弃」
+- **配置清理**：运行态 `tinda.conf` 删掉 13 个旧键（`PORT_MODE` / `NODE_MAX_OLD_SPACE_MB` /
+  `NAPCAT_WS_*` 等，代码不读），原文件备份为 `.bak-<时间戳>`；`snapshot.sh` 修掉
+  「原因里带斜杠导致快照嵌进多层目录」的问题
+- **测试**：`test-roundtrip` 11 → 18（重试、去重、补发）；新增 `test-alert` 9 项；
+  合计 78 项全过；README / RUNBOOK / 配置说明 / Bridge 面板 / 生产就绪清单 / 安全模型 / AGENTS 同步
+
 ## v0.2.18
 - 文档：新增《v0.2.18 全量复查报告》《Bridge 面板》《网关》，把问题清单、路由/状态契约、
   鉴权流程、失败模式与残余风险写成可查文档；生命周期补 `unit.sh stop` 的进程树语义

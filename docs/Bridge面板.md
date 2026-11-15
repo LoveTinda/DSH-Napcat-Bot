@@ -52,7 +52,21 @@
     "ok": 3,
     "failed": 1,
     "skipped": 3,
-    "busy": 0
+    "busy": 0,
+    "outbox": 0,
+    "requeued": 0
+  },
+  "alerts": {
+    "qq": "12*****89",
+    "sent": 1,
+    "suppressed": 2,
+    "lastKind": "fail",
+    "lastAt": 1763200000000,
+    "streak": 0,
+    "failStreak": 3,
+    "cooldownMs": 1800000,
+    "diskPercent": 74,
+    "diskAlertPercent": 90
   },
   "sessions": [
     {
@@ -79,6 +93,14 @@
     "BRIDGE_ALLOW_GROUP": true,
     "BRIDGE_TIMEOUT_MS": 180000,
     "BRIDGE_PERMISSION_MODE": "(profile 默认)",
+    "BRIDGE_SEND_RETRY": 3,
+    "BRIDGE_SEND_DRAIN_MS": 15000,
+    "BRIDGE_OUTBOX_TTL_MS": 21600000,
+    "BRIDGE_OUTBOX_FILE": "/root/workspace/tinda-bot/.runtime/state/bridge/outbox.json",
+    "ALERT_QQ": "(未设置)",
+    "ALERT_FAIL_STREAK": 3,
+    "ALERT_COOLDOWN_SEC": 1800,
+    "DISK_ALERT_PERCENT": 90,
     "NAPCAT_API": "http://127.0.0.1:3001",
     "NAPCAT_TOKEN": "(已设置)",
     "DSH_BIN": "/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js",
@@ -102,6 +124,13 @@
 | `counts.failed` | number | 失败轮数 |
 | `counts.skipped` | number | 跳过的事件数（含非消息事件/空消息/自己发的/群关闭） |
 | `counts.busy` | number | 有排队/处理中任务的聊天数 |
+| `counts.outbox` | number | 当前待补发的回复条数 |
+| `counts.requeued` | number | 累计进入补发队列的次数（只增） |
+| `alerts.qq` | string | 告警接收人（打码）；未设置时为 `(未设置)` |
+| `alerts.sent` / `suppressed` | number | 已发告警条数 / 被冷却压掉的次数 |
+| `alerts.streak` | number | 当前连续失败次数（成功一次清零） |
+| `alerts.lastKind` / `lastAt` | string / number | 最近一次告警的类型与时间 |
+| `alerts.diskPercent` | number \| null | 数据分区已用百分比；拿不到为 null |
 | `sessions[].key` | string | `private:<qq>` 或 `group:<group_id>` |
 | `sessions[].sessionId` | string | DSH 会话 id；空 = 尚未建立 |
 | `sessions[].messages` | number | 成功轮数 |
@@ -123,9 +152,9 @@
 
 ### 4.1 概览
 
-- 指标卡：收到消息、成功回复、失败、跳过、排队中、运行时长。
-- 信息行：后端、监听、NapCat API、状态文件。
-- 失败/排队 > 0 时数字用警示色。
+- 指标卡：收到消息、成功回复、失败、跳过、排队中、待补发、运行时长。
+- 信息行：后端、监听、NapCat API、状态文件、补发队列、告警接收、磁盘占用。
+- 失败/排队/待补发 > 0 时数字用警示色。
 
 ### 4.2 会话
 
@@ -141,10 +170,20 @@
 
 ### 4.4 配置
 
-- 按组展示：连接、行为、DSH、其它。
+- 按组展示：连接、行为、DSH、回发与告警、其它。
 - 值只读；空值显示 `(空)`；布尔显示 `开/关`。
 - 底部提示：改 `$DATA/etc/tinda.conf` 后 `bin/unit.sh restart bridge`。
 - **没有保存按钮**，这是安全边界，不是漏做。
+
+### 4.5 补发与告警（只读）
+
+- 概览的「待补发」= `counts.outbox`，来自 `$DATA/state/bridge/outbox.json`；
+  断网时已生成的回复会留在这里，恢复后由桥接器自己补发，面板不提供「重发/删除」按钮。
+- 「告警接收」显示打码后的 `ALERT_QQ` 与已发条数；没配时显示「未设置」，
+  按设计此时连续失败/磁盘告警都不会发。
+- 事件流里，补发成功记一条 `ok`（备注「补发成功」），入队失败记 `fail`（备注「回复已入补发队列」），
+  过期丢弃记 `fail`（备注「补发超时丢弃」）。
+- 这些状态都只在内存 + 一个 0600 的队列文件里，**不显示回复正文**。
 
 ## 5. 轮询与错误态
 

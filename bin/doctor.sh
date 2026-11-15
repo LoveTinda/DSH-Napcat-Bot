@@ -21,6 +21,50 @@ echo "uid=$(id -u)  MODDIR=$MODDIR  DATA=$DATA"
 if [ -d /data/adb/modules/tinda-bot ]; then echo "形态：Magisk 模块"; else echo "形态：仓库内直跑（无 /data/adb）"; fi
 echo "node=$([ -n "$NODE" ] && "$NODE" -v 2>/dev/null || echo 缺)"
 
+echo "== 资源与依赖"
+# S-9：零第三方依赖是设计约束，不是口号；这道门禁和 pre-commit 跑的是同一份。
+if [ -f "$MODDIR/bin/check-deps.mjs" ] && [ -n "$NODE" ]; then
+  _deps=$("$NODE" "$MODDIR/bin/check-deps.mjs" 2>&1 | tail -1)
+  case "$_deps" in
+    ok*) ok "$_deps" ;;
+    *) bad "$_deps" ;;
+  esac
+else
+  warn "缺 bin/check-deps.mjs，跳过依赖检查"
+fi
+_disk=$(df -P "$DATA" 2>/dev/null | awk 'NR==2{gsub("%","",$5); print $5}')
+case "$_disk" in
+  ''|*[!0-9]*) warn "读不到 $DATA 所在分区使用率" ;;
+  *) if [ "$_disk" -ge 90 ]; then warn "数据分区已用 ${_disk}%（DISK_ALERT_PERCENT 阈值 90%）"; else ok "数据分区已用 ${_disk}%"; fi ;;
+esac
+# T-4：堆上限看进程命令行，fd 上限看 /proc/<pid>/limits —— 都是「实际生效」而不是「配置里写了」。
+# PID 文件里是看守 subshell，不是 node；真实进程要按入口路径在 /proc 里找。
+node_pid() {
+  for _d in /proc/[0-9]*; do
+    _p=${_d#/proc/}
+    [ "$_p" = "$$" ] && continue
+    _c=$(tr '\0' ' ' < "$_d/cmdline" 2>/dev/null)
+    case "$_c" in
+      *node*"$1"*) echo "$_p"; return ;;
+    esac
+  done
+}
+for u in bridge web; do
+  case "$u" in
+    bridge) _entry="units/bridge/bridge.mjs" ;;
+    web) _entry="units/web/gateway.mjs" ;;
+  esac
+  _pid=$(node_pid "$_entry")
+  if [ -z "$_pid" ] || [ ! -r "/proc/$_pid/limits" ]; then
+    warn "$u 未运行，跳过资源上限核对"
+    continue
+  fi
+  _heap=$(tr '\0' ' ' < "/proc/$_pid/cmdline" 2>/dev/null | sed -n 's/.*max-old-space-size=\([0-9][0-9]*\).*/\1/p')
+  _fds=$(awk '/Max open files/ {print $4; exit}' "/proc/$_pid/limits" 2>/dev/null)
+  [ -n "$_heap" ] && ok "$u heap=${_heap}MB（实际生效）" || bad "$u 没有 --max-old-space-size：HEAP 配置未生效，需重启 $u"
+  [ -n "$_fds" ] && ok "$u fd 软上限=${_fds}" || warn "$u 读不到 fd 上限"
+done
+
 echo "== 配置"
 if [ -f "$CONF" ]; then
   _mode=$(stat -c %a "$CONF" 2>/dev/null)

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 目的：把三道门禁装成 .git/hooks/pre-commit，避免「规范写了但没人跑」。
+# 目的：把四道门禁（头注释/独立性/契约/依赖）装成 .git/hooks/pre-commit，避免「规范写了但没人跑」。
 # 边界：只写 .git/hooks/pre-commit；不覆盖已有的非本工具钩子（检测到标记才覆盖）。
 # 依赖：git、node（可选）、bin/check-*.sh。
 # 失败：不在 git 仓库 → 78；写文件失败 → 78。
@@ -22,6 +22,7 @@ ROOT=$(git rev-parse --show-toplevel)
 MODDIR="$ROOT" sh "$ROOT/bin/check-headers.sh"
 MODDIR="$ROOT" sh "$ROOT/bin/check-independence.sh"
 MODDIR="$ROOT" sh "$ROOT/bin/check-contracts.sh" || echo "warn 契约检查未通过（0.x 允许告警，见输出）"
+MODDIR="$ROOT" sh "$ROOT/bin/check-deps.sh"
 if command -v node >/dev/null 2>&1; then
   for f in $(find "$ROOT/units" "$ROOT/bin" -type f \( -name '*.mjs' -o -name '*.js' \) 2>/dev/null); do
     node --check "$f" >/dev/null || { echo "FAIL 语法：$f"; exit 1; }

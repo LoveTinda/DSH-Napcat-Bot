@@ -234,6 +234,7 @@ function renderOverview(s) {
     metric('失败', String(c.failed || 0), { warn: (c.failed || 0) > 0 }),
     metric('跳过', String(c.skipped || 0)),
     metric('排队中', String(c.busy || 0), { warn: (c.busy || 0) > 0 }),
+    metric('待补发', String(c.outbox || 0), { warn: (c.outbox || 0) > 0 }),
     metric('运行时长', fmtUptime(s.uptimeMs), { small: true })
   );
   const meta = $('meta');
@@ -249,6 +250,10 @@ function renderOverview(s) {
   row('监听', s.listen || '-');
   row('NapCat API', s.napcatApi || '-');
   row('状态文件', s.config && s.config.BRIDGE_STATE_FILE ? s.config.BRIDGE_STATE_FILE : '(不落盘)');
+  const al = s.alerts || {};
+  row('补发队列', String(c.outbox || 0) + ' 条' + (al.suppressed ? '（告警已压 ' + al.suppressed + ' 次）' : ''));
+  row('告警接收', al.qq ? al.qq + (al.sent ? ' · 已发 ' + al.sent + ' 条，最近 ' + fmtAgo(al.lastAt) : ' · 还没发过') : '未设置（ALERT_QQ）');
+  row('磁盘占用', al.diskPercent == null ? '未知' : al.diskPercent + '%（阈值 ' + (al.diskAlertPercent == null ? 90 : al.diskAlertPercent) + '%）');
 }
 
 function renderSessions(s) {
@@ -315,7 +320,8 @@ function renderConfig(s) {
     ['连接', ['BRIDGE_LISTEN', 'NAPCAT_API', 'NAPCAT_TOKEN', 'BRIDGE_STATE_FILE']],
     ['行为', ['BRIDGE_BACKEND', 'BRIDGE_ALLOW_GROUP', 'BRIDGE_TIMEOUT_MS', 'BRIDGE_PERMISSION_MODE']],
     ['DSH', ['DSH_BIN', 'DSH_HOME']],
-    ['其它', Object.keys(cfg).filter(function (k) { return !['BRIDGE_LISTEN', 'NAPCAT_API', 'NAPCAT_TOKEN', 'BRIDGE_STATE_FILE', 'BRIDGE_BACKEND', 'BRIDGE_ALLOW_GROUP', 'BRIDGE_TIMEOUT_MS', 'BRIDGE_PERMISSION_MODE', 'DSH_BIN', 'DSH_HOME'].includes(k); })]
+    ['回发与告警', ['BRIDGE_SEND_RETRY', 'BRIDGE_SEND_DRAIN_MS', 'BRIDGE_OUTBOX_TTL_MS', 'BRIDGE_OUTBOX_FILE', 'ALERT_QQ', 'ALERT_FAIL_STREAK', 'ALERT_COOLDOWN_SEC', 'DISK_ALERT_PERCENT']],
+    ['其它', Object.keys(cfg).filter(function (k) { return !['BRIDGE_LISTEN', 'NAPCAT_API', 'NAPCAT_TOKEN', 'BRIDGE_STATE_FILE', 'BRIDGE_BACKEND', 'BRIDGE_ALLOW_GROUP', 'BRIDGE_TIMEOUT_MS', 'BRIDGE_PERMISSION_MODE', 'DSH_BIN', 'DSH_HOME', 'BRIDGE_SEND_RETRY', 'BRIDGE_SEND_DRAIN_MS', 'BRIDGE_OUTBOX_TTL_MS', 'BRIDGE_OUTBOX_FILE', 'ALERT_QQ', 'ALERT_FAIL_STREAK', 'ALERT_COOLDOWN_SEC', 'DISK_ALERT_PERCENT'].includes(k); })]
   ];
   for (const g of groups) {
     if (!g[1].length) continue;

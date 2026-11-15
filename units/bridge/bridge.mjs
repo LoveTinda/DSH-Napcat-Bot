@@ -3,11 +3,13 @@
  * 目的：OneBot 11 桥接最小实现——接收 NapCat 的事件推送，交给 DSH 处理，把结果回发到聊天；
  *       同时提供只读面板与状态接口，供网关 /bridge/ 反代。
  * 边界：不做权限、人设、/output 分档、群上下文（后续单元再加）；不解析富文本，只取纯文本；
- *       不保存聊天记录；面板不接受写操作。
- * 依赖：NapCat 的 OneBot HTTP API（默认 127.0.0.1:3001）、DSH 的 `headless` 子命令、本机 node。
+ *       不保存聊天记录；面板不接受写操作；补发队列只存「待发出的回复」和最短路由信息，过期即删。
+ * 依赖：NapCat 的 OneBot HTTP API（默认 127.0.0.1:3001）、DSH 的 `headless` 子命令、本机 node、
+ *       ./alerts.mjs（连续失败/磁盘告警的判定）。
  * 失败：单条消息失败只回复错误摘要并记日志，进程不退出；上游不可达时由 DSH 自身报错；
  *       端口被占用会打印原因并以非 0 退出，由 unit.sh 退避重启。
- * 副作用：写 state/sessions.json（chatKey → DSH 会话 id）；不写用户聊天内容。
+ * 副作用：写 state/sessions.json（chatKey → DSH 会话 id）、state/outbox.json（待补发回复）；
+ *       不写用户聊天内容到日志或面板。
  */
 
 import fs from 'node:fs';
@@ -15,6 +17,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { renderPanel } from './panel.mjs';
+import { createAlertGate, diskUsedPercent, maskQq } from './alerts.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -28,7 +31,28 @@ const cfg = {
   dshBin: process.env.DSH_BIN || '/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js',
   dshHome: process.env.DSH_HOME || '',
   permissionMode: process.env.BRIDGE_PERMISSION_MODE || '',
+  // 回发失败的重试与补发（T-8）：先原地退避重试，仍失败就进 outbox，由定时器继续补。
+  sendRetry: clampInt(process.env.BRIDGE_SEND_RETRY, 3, 1, 10),
+  drainMs: clampInt(process.env.BRIDGE_SEND_DRAIN_MS, 15000, 500, 600000),
+  outboxTtlMs: clampInt(process.env.BRIDGE_OUTBOX_TTL_MS, 6 * 60 * 60 * 1000, 60000, 7 * 24 * 60 * 60 * 1000),
+  outboxFile: process.env.BRIDGE_OUTBOX_FILE || '',
+  // 告警（O-4）：空 ALERT_QQ = 关；阈值与冷却见 alerts.mjs 的常量说明。
+  alertQq: String(process.env.ALERT_QQ || '').trim(),
+  alertStreak: clampInt(process.env.ALERT_FAIL_STREAK, 3, 1, 100),
+  alertCooldownMs: clampInt(process.env.ALERT_COOLDOWN_SEC, 1800, 60, 86400) * 1000,
+  diskAlertPercent: clampInt(process.env.DISK_ALERT_PERCENT, 90, 50, 99),
 };
+
+/**
+ * 目的：读环境变量里的整数并夹在合法区间内，避免手改配置时把桥接器弄崩。
+ * 输入：原始值、缺省值、最小/最大；输出：区间内的整数；非法输入用缺省值。
+ * 失败：不抛错。副作用：无。
+ */
+function clampInt(raw, fallback, min, max) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(n)));
+}
 
 const [host, portText] = cfg.listen.split(':');
 const port = Number(portText || 6700);
@@ -42,6 +66,16 @@ const MAX_DSH_OUTPUT_CHARS = 4 * 1024 * 1024;
 const MAX_DSH_STDERR_CHARS = 4000;
 const MAX_REPLY_CHARS = 4000;
 const MAX_EVENTS = 100;
+
+// 重试/补发/去重的上限，同样是「按现象定」而不是拍脑袋：
+// - 去重窗口 500 条：NapCat 重推通常发生在几秒内，500 条足够覆盖，再多只是占内存；
+// - outbox 100 条：真断网久了补发也没意义，超出丢最旧并记一条 fail，避免无限增长；
+// - 退避基数 800ms：比 NapCat 的 30s 超时快得多，又不会在它重启时把连接打满；
+// - 磁盘每 5 分钟看一次：写盘增长是分钟级现象，更密只是浪费。
+const MAX_SEEN_IDS = 500;
+const OUTBOX_MAX = 100;
+const RETRY_BASE_MS = 800;
+const DISK_CHECK_MS = 5 * 60 * 1000;
 
 function log(...a) {
   const ts = new Date().toISOString();
@@ -63,9 +97,19 @@ function redactText(value) {
 
 // ---------- 面板用的统计 ----------
 const startedAt = Date.now();
-const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0 };
+const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0 };
 const events = [];               // 最近 100 条处理结果，只放元信息，不放聊天内容
 const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
+const seenIds = new Set();       // self_id:message_id，防 NapCat 重推导致同一条被回答两次
+const seenOrder = [];
+const outbox = [];               // 待补发回复：{ id, kind, userId, groupId, key, text, at, tries, lastError }
+const alertGate = createAlertGate({ failStreak: cfg.alertStreak, cooldownMs: cfg.alertCooldownMs });
+let lastDiskPercent = null;
+// 告警/补发都要写盘，目录从 stateFile 推；两个都为空（自测）时不落盘。
+const dataDir = cfg.outboxFile
+  ? path.dirname(path.dirname(cfg.outboxFile))
+  : (cfg.stateFile ? path.dirname(path.dirname(cfg.stateFile)) : '');
+if (!cfg.alertQq) log('warn: 未配置 ALERT_QQ，连续失败/磁盘告警不会发 QQ');
 
 /** 目的：记一条事件并裁剪到 100 条；任何异常都不许影响主流程。 */
 function record(status, key, ms, note) {
@@ -101,7 +145,13 @@ function snapshot() {
     listen: cfg.listen,
     napcatApi: cfg.napcatApi,
     uptimeMs: Date.now() - startedAt,
-    counts: { ...counts, busy: queues.size },
+    counts: { ...counts, busy: queues.size, outbox: outbox.length },
+    alerts: {
+      qq: cfg.alertQq ? maskQq(cfg.alertQq) : '(未设置)',
+      ...alertGate.stats(),
+      diskPercent: lastDiskPercent,
+      diskAlertPercent: cfg.diskAlertPercent,
+    },
     sessions: sessionsView,
     events: events.slice(0, MAX_EVENTS),
     config: {
@@ -110,6 +160,14 @@ function snapshot() {
       BRIDGE_ALLOW_GROUP: cfg.allowGroup,
       BRIDGE_TIMEOUT_MS: cfg.timeoutMs,
       BRIDGE_PERMISSION_MODE: cfg.permissionMode || '(profile 默认)',
+      BRIDGE_SEND_RETRY: cfg.sendRetry,
+      BRIDGE_SEND_DRAIN_MS: cfg.drainMs,
+      BRIDGE_OUTBOX_TTL_MS: cfg.outboxTtlMs,
+      BRIDGE_OUTBOX_FILE: cfg.outboxFile || '(不落盘)',
+      ALERT_QQ: cfg.alertQq ? maskQq(cfg.alertQq) : '(未设置)',
+      ALERT_FAIL_STREAK: cfg.alertStreak,
+      ALERT_COOLDOWN_SEC: Math.round(cfg.alertCooldownMs / 1000),
+      DISK_ALERT_PERCENT: cfg.diskAlertPercent,
       NAPCAT_API: cfg.napcatApi,
       NAPCAT_TOKEN: cfg.napcatToken ? '(已设置)' : '(未设置)',
       DSH_BIN: cfg.dshBin,
@@ -172,6 +230,23 @@ function classifyEvent(ev) {
   return { info: { kind, key, text, userId: senderId, groupId: ev.group_id, messageId: ev.message_id } };
 }
 
+/**
+ * 目的：识别 NapCat 重推的同一条消息（同一个 self_id + message_id），避免重复回答。
+ * 输入：原始 OneBot 事件；message_id 缺失时一律当作不重复。
+ * 输出：true = 本进程已经处理过这个 id。
+ * 失败：不抛错。副作用：把新 id 记进窗口，窗口满 500 条时淘汰最旧的。
+ */
+function isDuplicateEvent(ev) {
+  const id = ev && ev.message_id;
+  if (id == null || id === '') return false;
+  const key = String(ev.self_id ?? '') + ':' + String(id);
+  if (seenIds.has(key)) return true;
+  seenIds.add(key);
+  seenOrder.push(key);
+  if (seenOrder.length > MAX_SEEN_IDS) seenIds.delete(seenOrder.shift());
+  return false;
+}
+
 // ---------- 回发 ----------
 async function sendReply(info, text) {
   const action = info.kind === 'group' ? 'send_group_msg' : 'send_private_msg';
@@ -186,6 +261,186 @@ async function sendReply(info, text) {
   if (!res.ok || (data && data.status && data.status !== 'ok')) {
     throw new Error(`发送失败 HTTP ${res.status} ${redactText(JSON.stringify(data)).slice(0, 200)}`);
   }
+}
+
+// ---------- 补发队列：发不出去的回复不丢 ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 目的：从盘上恢复上次进程留下的待补发回复，重启不丢。
+ * 输入：$BRIDGE_OUTBOX_FILE（缺失/坏 JSON 当作空）。
+ * 输出：无；填 outbox 数组并打一行日志。
+ * 失败：读失败只 warn（ENOENT 静默），不清空内存里的队列。
+ * 副作用：只读文件。
+ */
+function loadOutbox() {
+  if (!cfg.outboxFile) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(cfg.outboxFile, 'utf8'));
+    if (!Array.isArray(raw)) return;
+    for (const it of raw) {
+      if (!it || typeof it !== 'object' || typeof it.text !== 'string' || !it.text) continue;
+      outbox.push({
+        id: String(it.id || Date.now().toString(36) + '-' + outbox.length),
+        kind: it.kind === 'group' ? 'group' : 'private',
+        userId: String(it.userId || ''),
+        groupId: it.groupId == null ? '' : String(it.groupId),
+        key: String(it.key || ''),
+        text: it.text.slice(0, MAX_REPLY_CHARS),
+        at: Number(it.at) || Date.now(),
+        tries: Number(it.tries) || 0,
+        lastError: redactText(it.lastError || '').slice(0, 120),
+      });
+    }
+    if (outbox.length) log('info: 载入待补发', outbox.length, '条');
+  } catch (e) {
+    if (e.code !== 'ENOENT') log('warn: 补发队列读取失败', redactText(e.message));
+  }
+}
+
+/**
+ * 目的：把补发队列原子落盘（tmp + rename），断电/被杀不会留半截 JSON。
+ * 输入：无；输出：无。
+ * 失败：写失败只 warn，内存队列继续用，下一轮再试。
+ * 副作用：写 $BRIDGE_OUTBOX_FILE（0600）。
+ */
+function saveOutbox() {
+  if (!cfg.outboxFile) return;
+  try {
+    fs.mkdirSync(path.dirname(cfg.outboxFile), { recursive: true });
+    const tmp = cfg.outboxFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(outbox, null, 1), { mode: 0o600 });
+    fs.renameSync(tmp, cfg.outboxFile);
+  } catch (e) {
+    log('warn: 补发队列写入失败', redactText(e.message));
+  }
+}
+
+/**
+ * 目的：把一条「已生成但发不出去」的回复放进补发队列。
+ * 输入：info（路由）、text（已截断的回复）、err（最后一次发送错误，仅用于面板）。
+ * 输出：无。队列超过 OUTBOX_MAX 时丢最旧的并记一条 fail，避免无限增长。
+ * 失败：不抛错；写盘失败由 saveOutbox 自己 warn。
+ * 副作用：改 outbox、counts.requeued，可能写盘。
+ */
+function enqueueOutbox(info, text, err) {
+  counts.requeued++;
+  outbox.push({
+    id: Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+    kind: info.kind,
+    userId: String(info.userId || ''),
+    groupId: info.groupId == null ? '' : String(info.groupId),
+    key: String(info.key || ''),
+    text: text.slice(0, MAX_REPLY_CHARS),
+    at: Date.now(),
+    tries: 0,
+    lastError: redactText(err && err.message).slice(0, 120),
+  });
+  while (outbox.length > OUTBOX_MAX) {
+    const dropped = outbox.shift();
+    record('fail', dropped.key, 0, '补发队列已满，丢弃最旧一条');
+  }
+  saveOutbox();
+}
+
+/**
+ * 目的：带退避地把一条回复发出去，覆盖 NapCat 短暂重启/抖动。
+ * 输入：info 路由、text 回复；尝试次数来自 BRIDGE_SEND_RETRY。
+ * 输出：成功返回；全部失败时抛最后一次错误，由调用方决定入队。
+ * 失败：抛错（调用方处理），单次等待 0.8s/1.6s/3.2s…
+ * 副作用：发网络请求。
+ */
+async function deliver(info, text) {
+  let last = null;
+  for (let i = 0; i < cfg.sendRetry; i++) {
+    try {
+      await sendReply(info, text);
+      return;
+    } catch (e) {
+      last = e;
+      if (i + 1 < cfg.sendRetry) {
+        log('warn: 回发失败，准备重试', i + 1, redactText(e.message));
+        await sleep(RETRY_BASE_MS * 2 ** i);
+      }
+    }
+  }
+  throw last;
+}
+
+let draining = false;
+/**
+ * 目的：定时/启动时把队列里的回复补发出去；过期的直接丢弃，避免断网一天后刷屏。
+ * 输入：无；输出：无。
+ * 失败：单条失败只累加 tries/lastError，不中断整轮；异常由调用方 catch。
+ * 副作用：发网络请求、改 outbox、写盘；成功时 counts.ok++。
+ */
+async function drainOutbox() {
+  if (draining || !outbox.length) return;
+  draining = true;
+  let changed = false;
+  try {
+    for (const item of [...outbox]) {
+      const idx = outbox.indexOf(item);
+      if (idx < 0) continue;
+      if (Date.now() - item.at > cfg.outboxTtlMs) {
+        outbox.splice(idx, 1);
+        changed = true;
+        record('fail', item.key, 0, '补发超时丢弃（' + item.tries + ' 次尝试）');
+        log('warn: 补发超时丢弃', item.key, redactText(item.lastError));
+        continue;
+      }
+      try {
+        await sendReply({ kind: item.kind, userId: item.userId, groupId: item.groupId }, item.text);
+        outbox.splice(idx, 1);
+        changed = true;
+        counts.ok++;
+        record('ok', item.key, 0, '补发成功');
+        log('ok 补发', item.kind, item.key);
+      } catch (e) {
+        item.tries++;
+        changed = true;
+        item.lastError = redactText(e.message).slice(0, 120);
+      }
+    }
+  } finally {
+    draining = false;
+    if (changed) saveOutbox();
+  }
+}
+
+/**
+ * 目的：给号主发一条告警（私聊），并且不让告警失败影响业务。
+ * 输入：文本；ALERT_QQ 为空时直接返回。
+ * 输出：无。
+ * 失败：发送失败只记事件+日志，不抛错、不进补发队列（避免告警自身把队列塞满）。
+ * 副作用：发网络请求、写事件。
+ */
+async function notifyOwner(text) {
+  if (!cfg.alertQq) return;
+  try {
+    await sendReply({ kind: 'private', userId: cfg.alertQq }, text.slice(0, MAX_REPLY_CHARS));
+    record('ok', 'alert', 0, '已发告警');
+    log('warn: 已向号主发告警', redactText(text).slice(0, 80));
+  } catch (e) {
+    record('fail', 'alert', 0, '告警发送失败 ' + redactText(e.message));
+    log('warn: 告警发送失败', redactText(e.message));
+  }
+}
+
+/**
+ * 目的：把一次处理失败折算成「要不要告警」，并负责节流。
+ * 输入：原因摘要（已脱敏前的原文）。
+ * 输出：无。
+ * 失败：不抛错。
+ * 副作用：可能发一条私聊告警。
+ */
+function noteFailure(reason) {
+  if (!alertGate.recordFailure()) return;
+  alertGate.markSent('fail');
+  const st = alertGate.stats();
+  notifyOwner('桥接器连续失败 ' + st.streak + ' 次（阈值 ' + cfg.alertStreak + '）。最近原因：' +
+    redactText(reason).slice(0, 200) + '。看日志：bin/unit.sh logs bridge 40')
+    .catch((e) => log('warn: 告警流程异常', redactText(e.message)));
 }
 
 // ---------- DSH 后端 ----------
@@ -340,15 +595,33 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const info = classified.info;
+  // NapCat 在超时/重连时会重推同一个 message_id；不拦会导致同一个问题回答两次。
+  if (isDuplicateEvent(ev)) {
+    counts.skipped++;
+    record('skip', info.key, 0, '重复推送（同一 message_id），已忽略');
+    return;
+  }
   counts.incoming++;
   enqueue(info.key, async () => {
     const started = Date.now();
     try {
       const { text } = await askDsh(info);
       const reply = (text || '').trim() || '（DSH 没有返回内容）';
-      await sendReply(info, reply.slice(0, MAX_REPLY_CHARS));
+      try {
+        await deliver(info, reply.slice(0, MAX_REPLY_CHARS));
+      } catch (sendErr) {
+        // DSH 已经算出了答案，只是发不出去：进补发队列，别把答案丢了，也别再发一条「出错了」。
+        enqueueOutbox(info, reply, sendErr);
+        const ms = Date.now() - started;
+        counts.failed++;
+        record('fail', info.key, ms, '回复已入补发队列（回发失败）');
+        log('fail:send', info.kind, info.key, redactText(sendErr.message));
+        noteFailure('回发失败：' + sendErr.message);
+        return;
+      }
       const ms = Date.now() - started;
       counts.ok++;
+      alertGate.recordSuccess();
       const st = chatStats.get(info.key) || { messages: 0 };
       chatStats.set(info.key, { messages: st.messages + 1, lastAt: Date.now(), lastMs: ms });
       record('ok', info.key, ms, reply.length + ' 字');
@@ -360,6 +633,7 @@ const server = http.createServer(async (req, res) => {
       chatStats.set(info.key, { messages: st.messages, lastAt: Date.now(), lastMs: ms });
       record('fail', info.key, ms, e.message);
       log('fail', info.kind, info.key, redactText(e.message));
+      noteFailure(e.message);
       try { await sendReply(info, `出错了：${redactText(e.message).slice(0, 200)}`); } catch (e2) { log('fail:reply', redactText(e2.message)); }
     }
   });
@@ -370,7 +644,24 @@ server.on('error', (e) => {
   log('fatal: 监听失败', cfg.listen, e.code || e.message);
   process.exit(1);
 });
-server.listen(port, host, () => log('bridge 已启动', cfg.listen, 'backend=' + cfg.backend, 'napcat=' + cfg.napcatApi));
+// 补发：启动时先恢复上次的队列并试一轮，之后按 BRIDGE_SEND_DRAIN_MS 轮询。
+loadOutbox();
+setTimeout(() => { drainOutbox().catch((e) => log('warn: 补发轮询异常', redactText(e.message))); }, 1000).unref();
+setInterval(() => { drainOutbox().catch((e) => log('warn: 补发轮询异常', redactText(e.message))); }, cfg.drainMs).unref();
+
+// 磁盘告警：每 5 分钟看一次数据目录所在分区；只有「超过阈值且过了冷却」才发。
+setInterval(() => {
+  lastDiskPercent = diskUsedPercent(dataDir);
+  if (lastDiskPercent == null || !cfg.alertQq) return;
+  if (lastDiskPercent < cfg.diskAlertPercent || !alertGate.allowDisk()) return;
+  alertGate.markSent('disk');
+  notifyOwner('磁盘将满：' + lastDiskPercent + '%（阈值 ' + cfg.diskAlertPercent + '%）。数据目录 ' +
+    (dataDir || '(未知)') + '；先清 logs/ 或把备份挪走，再跑 bin/doctor.sh 复核。')
+    .catch((e) => log('warn: 磁盘告警异常', redactText(e.message)));
+}, DISK_CHECK_MS).unref();
+
+server.listen(port, host, () => log('bridge 已启动', cfg.listen, 'backend=' + cfg.backend, 'napcat=' + cfg.napcatApi,
+  '补发队列=' + outbox.length + ' 告警=' + (cfg.alertQq ? maskQq(cfg.alertQq) : '关')));
 
 process.on('unhandledRejection', (e) => {
   log('fatal: 未处理的 Promise rejection', redactText(e && e.stack ? e.stack : e));

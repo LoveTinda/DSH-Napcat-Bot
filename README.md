@@ -4,7 +4,9 @@ QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，�
 所有改动进 git，每次更新落一份完整备份到 `/sdcard/backup/`。
 
 **现在能做什么**：QQ 私聊/群聊发消息 → 桥接器 → `dsh headless` → 回到 QQ；
-网页控制台看桥接器面板（概览 / 会话 / 事件 / 只读配置）；每轮续接同一个 DSH 会话。
+网页控制台看桥接器面板（概览 / 会话 / 事件 / 只读配置）；每轮续接同一个 DSH 会话；
+回复发不出去时先重试、再进补发队列，NapCat/网络恢复后自动送达（同一 `message_id` 不重复回答）；
+连续失败或磁盘将满会私聊告警给 `ALERT_QQ`。
 
 **还没做什么**：`/output` 分档、完整 `/help` 命令表、群上下文注入、DSH 独立容器、Magisk 打包实测。
 
@@ -60,8 +62,10 @@ sh bin/backup-to-sdcard.sh       # 完整备份到 /sdcard/backup/
 MODDIR=$PWD sh bin/check-headers.sh
 MODDIR=$PWD sh bin/check-independence.sh
 MODDIR=$PWD sh bin/check-contracts.sh   # 当前会如实告警「契约未实现」，不是通过
+MODDIR=$PWD sh bin/check-deps.sh       # 只允许 node: 内置与相对路径（零第三方依赖）
 node units/web/test-gateway.mjs
 node units/bridge/test-panel.mjs
+node units/bridge/test-alert.mjs
 ```
 
 动手改代码前先跑 `bin/snapshot.sh "原因"`；它现在会把 `bin/`、`units/`、`contracts/` 也一起快照。
