@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # 目的：把 NapCat 的 OneBot 11 网络配置接到桥接器——开 HTTP API（给回发用）+ HTTP 事件推送（给收消息用）。
 # 边界：只改 /opt/napcat/config/onebot11_<uin>.json 的 network 段；不动 QQ 登录、不动别的配置。
+# 依赖：node、/opt/napcat/config/onebot11_<uin>.json、$DATA/secrets/napcat.token。
 # 输入：$DATA/secrets/napcat.token（没有就生成 24 位十六进制），端口取 NAPCAT_HTTP_PORT / BRIDGE_LISTEN。
 # 失败：找不到 onebot11_<uin>.json（说明还没登录过）→ 78；写文件失败 → 78。
 # 副作用：写 onebot11 配置与 token 文件（0600）。改完必须重启 NapCat 才生效，本脚本不重启。

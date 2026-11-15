@@ -7,7 +7,7 @@
 LOG_MAX_MB=50
 
 # ---- 单元看守 ----
-# 单个单元连续失败多少次后停止重试（units/<name>/unit.conf 的 RESTART_MAX 覆盖这个默认）
+# 退避重启的等待上限（秒）。连续失败次数上限在 units/<name>/unit.conf 的 RESTART_MAX。
 RESTART_BACKOFF_MAX=60
 
 # ---- 桥接器（units/bridge）----
@@ -21,8 +21,6 @@ BRIDGE_ALLOW_GROUP=1
 BRIDGE_TIMEOUT_MS=180000
 # 透传给 dsh headless --permission-mode；空 = 用 profile 默认
 BRIDGE_PERMISSION_MODE=
-# 面板端口。留空/不写则跟着 BRIDGE_LISTEN 的端口走，网关用它拼 /bridge/ 上游
-BRIDGE_PANEL_PORT=
 
 # ---- OneBot 回发（桥接器 → NapCat）----
 NAPCAT_API=http://127.0.0.1:3001

@@ -15,7 +15,5 @@
     "sendTurn 必须在结束时给一个确定终态（done/error/interrupted）",
     "interrupt 后不得再把该回合的事件写给新会话（bindingGen 语义）"
   ],
-  "implementedBy": [
-    "app/src/dsh.js"
-  ]
+  "implementedBy": []
 }

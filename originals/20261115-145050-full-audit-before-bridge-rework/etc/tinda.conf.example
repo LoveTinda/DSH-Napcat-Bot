@@ -1,0 +1,50 @@
+# 目的：模块级配置。真配置放 $DATA/etc/tinda.conf（0600，不入库）。
+# 边界：这里只放 bin/*.sh 真的会读的键。每个键在 docs/配置说明.md 都有一行说明。
+# 说明：Magisk 形态下 $DATA=/data/adb/tinda-bot；仓库内直跑时 $DATA=<仓库>/.runtime。
+#      首次运行任一 bin/*.sh 会自动把它复制到 $DATA/etc/tinda.conf，之后改那份。
+
+# ---- 日志 ----
+LOG_MAX_MB=50
+
+# ---- 单元看守 ----
+# 单个单元连续失败多少次后停止重试（units/<name>/unit.conf 的 RESTART_MAX 覆盖这个默认）
+RESTART_BACKOFF_MAX=60
+
+# ---- 桥接器（units/bridge）----
+# OneBot 11 事件入口。NapCat 的 httpClients 往这里推。
+BRIDGE_LISTEN=127.0.0.1:6700
+# 后端：headless（每轮 spawn 一次 dsh）/ echo（自测，原样回显）
+BRIDGE_BACKEND=headless
+# 是否处理群消息；0 = 只听私聊
+BRIDGE_ALLOW_GROUP=1
+# 单轮最长等待，超时杀子进程并回一条错误
+BRIDGE_TIMEOUT_MS=180000
+# 透传给 dsh headless --permission-mode；空 = 用 profile 默认
+BRIDGE_PERMISSION_MODE=
+# 面板端口。留空/不写则跟着 BRIDGE_LISTEN 的端口走，网关用它拼 /bridge/ 上游
+BRIDGE_PANEL_PORT=
+
+# ---- OneBot 回发（桥接器 → NapCat）----
+NAPCAT_API=http://127.0.0.1:3001
+# napcat-wire-onebot.sh 给 NapCat 开 HTTP API 用的端口（应与 NAPCAT_API 的端口一致）
+NAPCAT_HTTP_PORT=3001
+# NapCat 的 WebUI 配置，网关从这里读它自己的 token，自动带给面板
+NAPCAT_WEBUI_JSON=/opt/napcat/config/webui.json
+
+# ---- DSH 后端 ----
+DSH_NODE=
+DSH_BIN=/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js
+DSH_HOME=/root/.dsh
+
+# ---- 统一 Web 网关（units/web）----
+WEB_BIND=0.0.0.0
+WEB_PORT=8443
+# 明文 301 跳到 8443；0 = 关
+WEB_REDIRECT_PORT=8088
+# 自签证书 SAN 里写哪个局域网地址
+WEB_LAN_IP=192.168.1.3
+# 各面板的根路径端口：它们的前端用绝对路径，挤在 8443 的前缀下面会 404
+WEB_DSH_ORIGIN_PORT=8444
+WEB_NAPCAT_ORIGIN_PORT=8445
+# 证书装不进信任库时的逃生口：明文直连端口（默认 0 = 关，仅调试）
+WEB_HTTP_PORT=0

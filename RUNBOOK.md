@@ -63,21 +63,22 @@ sh bin/unit.sh logs web 20
 sh bin/doctor.sh
 ```
 
-它按顺序查：环境 → 目录与 0600 权限 → 四个单元 → 五个端口 → OneBot 登录态 →
-桥接器面板 → 网关状态 → 最新备份 → git 工作区 → 最近 error/fatal。
-任何一项 FAIL 退出码为 1。当前全绿的样子：
+它按顺序查：环境 → 配置（缺键/旧键/权限）→ 暴露面（回环/token）→ 目录与 0600 权限 →
+证书 SAN → 四个单元 → 配置里的所有端口 → OneBot 登录态 → 桥接器面板 → 网关状态 →
+最新备份 → git 工作区 → 各单元最近错误。任何一项 FAIL 退出码为 1；warn 不阻断。
+
+成功时末尾是：
 
 ```console
-== 单元
-ok    napcat: running pid=28265
-ok    bridge: running pid=31860
-ok    web: running pid=31239
-ok    dsh: running (external, http://127.0.0.1:3080 可连)
-== OneBot
 ok    OneBot uid=3876238785 nick=Love Tindaᯠ ⑅ ᯄ
-== 网关
-ok    8443 {"bridge":true,"dsh":true,"napcat":true}
+ok    ok backend=headless 收到=4 成功=3 失败=1 跳过=3
+ok    网关 {"dsh":true,"bridge":true,"napcat":true}
+
+结论：主要链路都通
 ```
+
+旧版 `.runtime/etc/tinda.conf` 会显示一堆「未知配置键」——那是重写前的键残留，
+代码不读它们；`bin/lib.sh` 只会补新键，不会删旧键。清理时按清单手工删，别直接覆盖整份配置。
 
 ## 4. 首次从零装起来
 
@@ -143,7 +144,9 @@ sh bin/doctor.sh
 https://<局域网IP>:8443/?k=<$DATA/secrets/web.token>
 ```
 
-第一次带 `?k=` 进来会种 cookie（`tinda`），之后标签页里的 iframe 才能通过鉴权。
+第一次带 `?k=` 进来会种一个 **HttpOnly** cookie（`tinda`），之后标签页里的 iframe 靠它鉴权。
+导航页脚本不读 token，也不会把 token 拼进 iframe 地址；地址栏里的 `?k=` 在页面加载后会被抹掉，
+避免留在浏览器历史和 Referer 里。退出用导航页右上角的「退出」，它会让网关清 cookie。
 
 ## 5. 重启后不用重新扫码
 
@@ -169,7 +172,7 @@ https://<局域网IP>:8443/?k=<$DATA/secrets/web.token>
 （上游假设一次性任务用启动时给的 `DEEPSEEK_API_KEY`），本机只有 App 的账号登录态。
 `$DSH_HOME/profiles/headless/cordis.patch.yml` 里把 `credentials` / `authorization` /
 `deepseek-account` 重新打开、默认模型指到 `deepseek-account`，就能复用同一份登录态。
-详见 `docs/配置说明.md` §14。
+详见 `docs/配置说明.md` §8。
 
 自测这条链路（不碰 QQ）：
 
@@ -183,20 +186,29 @@ printf '只回四个字：测试成功' | node /opt/dsh/node_modules/@deepseek-a
 
 | 标签 | 实际地址 | 说明 |
 | --- | --- | --- |
-| 桥接器 | `/bridge/` | 概览/会话/事件/配置，数据来自 `/panel/state.json`，2 秒轮询 |
+| 桥接器 | `/bridge/` | 概览/会话/事件/只读配置，页面相对取 `state.json`，2 秒轮询；可暂停 |
 | DSH | `https://<IP>:8444/` | **进不去**，见下 |
 | NapCat | `https://<IP>:8445/` | 真实 WebUI，扫码、看日志、改配置都在这 |
 
 DSH 那格显示一页说明而不是空白：它的网页端有一把每次启动随机生成、只存在内存里的授权串，
 只认自己打印的链接，网关替它签不了。这不是坏了。
 
-## 8. 改完代码必须做的三件事
+桥接器面板的 `/panel/state.json` 和 `/state.json` 是同一份只读快照；页面在 `/panel/` 下用
+相对路径 `state.json`，在 `/bridge/` 前缀下由网关转发到 `/state.json`，两种挂载都不会 404。
+面板不做写操作：改 `BRIDGE_BACKEND` 等配置请编辑 `$DATA/etc/tinda.conf`，再
+`sh bin/unit.sh restart bridge`。
+
+## 8. 改完代码必须做的事
 
 ```sh
 MODDIR=$PWD sh bin/check-headers.sh        # 头注释齐全
 MODDIR=$PWD sh bin/check-independence.sh   # 单元之间不互相 import
-MODDIR=$PWD sh bin/backup-to-sdcard.sh     # 落一份完整备份到 /sdcard/backup/
+MODDIR=$PWD sh bin/check-contracts.sh      # 契约检查；当前会如实告警「未实现」
+node units/bridge/test-panel.mjs           # 面板/事件/会话
+node units/bridge/test-headless.mjs        # DSH 适配与会话恢复
+node units/web/test-gateway.mjs            # 网关鉴权/cookie/反代
 git add -A && git commit                  # 提交信息写清 为什么/改动/验证
+sh bin/backup-to-sdcard.sh                 # 落一份完整备份到 /sdcard/backup/
 git push origin main                      # 22 端口被墙，~/.ssh/config 已映射到 443
 ```
 
@@ -204,8 +216,8 @@ git push origin main                      # 22 端口被墙，~/.ssh/config 已�
 
 ```console
 $ sh bin/backup-to-sdcard.sh
-OK /sdcard/backup/tinda-bot-v0.2.14-20261115-143417
-   629 个文件，5.5M
+OK /sdcard/backup/tinda-bot-v0.2.18-20261115-150455
+   388 个文件，4.4M
 ```
 
 ## 8.5 备份组成与恢复
@@ -214,10 +226,10 @@ OK /sdcard/backup/tinda-bot-v0.2.14-20261115-143417
 
 | 部分 | 文件数 | 是什么 |
 | --- | --- | --- |
-| `.git/` | ~31（gc 后） | git 历史；不 gc 会有 400+ 个散对象小文件 |
-| `originals/` | 219 | 10 份原文件快照，只读，永不改 |
-| 真正项目文件 | ~60 | 脚本、单元、文档、契约 |
-| `repo.bundle` | 1 | 单文件仓库快照，220KB |
+| `.git/` | 约 32（gc 后） | git 历史；不 gc 会有 400+ 个散对象小文件 |
+| `originals/` | 约 290+ | 原文件快照，只读，永不改；每跑一次 `snapshot.sh` 就多一份 |
+| 真正项目文件 | 约 65 | 脚本、单元、文档、契约、模板 |
+| `repo.bundle` | 1 | 单文件仓库快照，约 210KB |
 | `SHA256SUMS` | 1 | 校验和 |
 
 所以「备份有几百个文件」不代表项目变胖了，**大头是历史和快照**。
@@ -241,17 +253,21 @@ git clone /sdcard/backup/tinda-bot-<版本>-<时间>/repo.bundle ~/tinda-restore
 | 现象 | 先看这里 | 常见原因 |
 | --- | --- | --- |
 | 控制台 401 | `doctor.sh` 的「网关」项 | 端口上跑的是旧实例，token 和 `secrets/web.token` 不一致；`stop` 后重起 |
+| 控制台一直弹 token | 地址栏有没有 `?k=`；`curl` 看 `set-cookie` 是否带 HttpOnly | token 里有特殊字符时会被编码；重新用 `?k=` 进一次，或检查网关是否还是旧版本 |
+| 桥接面板 502 | `unit.sh status bridge` / `logs bridge` | 网关的 `BRIDGE_PANEL_PORT` 是从 `BRIDGE_LISTEN` 推导的；桥接器没起或端口不一致 |
+| 桥接面板能开但数字不动 | 浏览器控制台 Network | 页面取的是相对 `state.json`；确认 `/bridge/state.json` 返回 200，不是 401/404 |
 | 面板一片空白 | 浏览器开 8445 直接访问 | 前端写死绝对路径 `/webui/assets`、`/api/…`，必须走独立端口 |
 | NapCat 面板登录失败 | `POST /api/auth/login` 的 `hash` | 少了 `?token=` 会白屏、多了会让 login 直接 Unauthorized；网关只给页面补 |
 | QQ 掉线 | `unit.sh logs napcat` 有没有「快速登录」 | 没注入 `-q`，退化成扫码 |
-| 桥接器收到不回复 | `logs bridge` | DSH 报 `MISSING_CREDENTIAL` / `ACCOUNT_SIGN_IN_REQUIRED`，查 §14 的 patch |
+| 桥接器收到不回复 | `logs bridge` | DSH 报 `MISSING_CREDENTIAL` / `ACCOUNT_SIGN_IN_REQUIRED`，查配置说明 §8 的 patch |
 | 回复发不出去 | `3001/get_status` | `httpServers` 没开，或 `secrets/napcat.token` 和 NapCat 里写的不一致 |
 | 起了两个同样的进程 | `doctor.sh` 端口项 | 旧实例没停干净；`unit.sh stop` 只认自己 pid，手起的要先手动 kill |
 
 ## 10. 硬性约束
 
 1. `$DATA/secrets/` 下都是 0600，不进 git；`sessions.json` 只存 chatKey → 会话 id，不存聊天正文
-2. 面板事件流只记「哪个聊天、多久、成没成、几个字」，不记内容
+2. 面板事件流只记「哪个聊天、多久、成没成、几个字」，失败备注会脱敏并截断，不记内容
 3. 同一个 QQ 号不要起两个 NapCat
+4. 桥接面板是只读的；不要给它加写接口，除非先解决「本机任意进程可直连 6700」的鉴权问题
 4. 改 `/opt` 下的东西（launcher、OneBot 配置）在 git 里没有痕迹，所以每个动作都要有脚本：
    `bin/napcat-start-host.sh`、`bin/napcat-wire-onebot.sh` 就是为此存在

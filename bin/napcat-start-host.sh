@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # 目的：在无显示器环境里拉起 NapCat——Xvfb + QQ 主进程 + tinda-launcher 注入。
 # 边界：只负责启动，不探活、不重试、不装包；登录状态在 /opt/napcat/.config/QQ 里，重启不会掉号。
+# 依赖：Xvfb、/opt/QQ、/opt/napcat/tinda-launcher.js、$DATA/logs。
 # 失败：QQ 或 launcher 缺失 → 78；其它情况交给 supervisor 退避重启。
 # 副作用：日志追加到 $DATA/logs/napcat.log（由调用方重定向）。
 

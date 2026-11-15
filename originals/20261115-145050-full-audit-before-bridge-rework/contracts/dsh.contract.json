@@ -1,0 +1,21 @@
+{
+  "id": "dsh",
+  "version": 1,
+  "purpose": "智能体内核：会话、工具、preset、压缩。桥接器不实现智能，只编排。",
+  "required": {
+    "createSession": "新建会话，可带 agentPreset；返回 sessionId",
+    "sendTurn": "发送一轮输入，流式返回事件（文本/工具/思考/结束）",
+    "interrupt": "打断当前回合",
+    "compact": "压缩更早历史",
+    "exportSession": "导出会话为 ZIP",
+    "listPresets": "列出可用人设（DSH preset）",
+    "getSessionInfo": "查会话状态（contextPressure、agentPreset 等）"
+  },
+  "guarantees": [
+    "sendTurn 必须在结束时给一个确定终态（done/error/interrupted）",
+    "interrupt 后不得再把该回合的事件写给新会话（bindingGen 语义）"
+  ],
+  "implementedBy": [
+    "app/src/dsh.js"
+  ]
+}

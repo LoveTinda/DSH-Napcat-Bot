@@ -1,0 +1,19 @@
+{
+  "id": "onebot",
+  "version": 1,
+  "purpose": "QQ 侧接入：收事件、发消息、发动作。桥接器对 NapCat/其他 OneBot 实现的唯一依赖面。",
+  "required": {
+    "connect": "建立连接（forward-ws / reverse-ws / http），返回是否就绪",
+    "sendMessage": "发送消息（文本/图片/视频/@），返回 message_id",
+    "sendAction": "发送 OneBot 动作（set_input_status、poke、like、delete_msg 等）",
+    "onEvent": "注册事件回调，入参为归一化前的原始 OneBot 事件"
+  },
+  "guarantees": [
+    "sendMessage 失败必须抛出，不得静默返回 undefined",
+    "同一 message_id 的入站事件必须可去重",
+    "断线后由实现负责重连，不允许把断线暴露成业务错误"
+  ],
+  "implementedBy": [
+    "app/src/onebot.js"
+  ]
+}

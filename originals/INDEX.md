@@ -48,3 +48,14 @@
 - 目录：originals/20261115-033920-v0.2.6-变更记录补齐
 - 清单：SHA256SUMS
 
+
+## 20261115-145050 — full-audit-before-bridge-rework
+- 文件数：72
+- 目录：originals/20261115-145050-full-audit-before-bridge-rework
+- 清单：SHA256SUMS
+
+## 20261115-150510 — v0.2.18-复查后-提交前
+- 文件数：62
+- 目录：originals/20261115-150510-v0.2.18-复查后-提交前
+- 清单：SHA256SUMS
+

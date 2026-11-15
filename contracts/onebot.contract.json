@@ -13,7 +13,5 @@
     "同一 message_id 的入站事件必须可去重",
     "断线后由实现负责重连，不允许把断线暴露成业务错误"
   ],
-  "implementedBy": [
-    "app/src/onebot.js"
-  ]
+  "implementedBy": []
 }

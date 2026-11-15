@@ -1,3 +1,6 @@
 .runtime/
-originals/*/app/**
 node_modules/
+# 设备/账号特化不入库；目录说明保留
+local/*
+!local/README.md
+originals/*/app/**

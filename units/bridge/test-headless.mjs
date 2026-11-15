@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // 目的：验证 headless 后端适配层——参数拼装、ndjson 解析、会话续接、失败兜底，用假 dsh 代替真模型。
 // 边界：不调用真实 DSH（没有 API key），只测适配层逻辑；不测 QQ 登录。
+// 依赖：node 内置 fs/http/child_process；临时目录与 16701/13002 端口。
 // 输入：无（自己生成假 dsh 与假 NapCat）。
 // 失败：任一断言不成立 → 退出码 1。
 // 副作用：写临时目录；占用本机 16701/13002 端口。
@@ -30,10 +31,11 @@ let input = '';
 process.stdin.on('data', (d) => { input += d; });
 process.stdin.on('end', () => {
   if (input.includes('FAILME')) { console.error('boom'); process.exit(3); }
-  const sid = argv.includes('--resume') ? argv[argv.indexOf('--resume') + 1]
-            : argv.includes('--session-id') ? argv[argv.indexOf('--session-id') + 1] : 'sess-1';
-  process.stdout.write(JSON.stringify({ type: 'session', sessionId: 'sess-1' }) + '\\n');
-  process.stdout.write(JSON.stringify({ type: 'assistant', text: '收到：' + input.trim(), sessionId: 'sess-1' }) + '\\n');
+  const hasSid = argv.includes('--session-id');
+  if (input.includes('RESETME') && hasSid) { console.error('unknown session: ' + argv[argv.indexOf('--session-id') + 1]); process.exit(1); }
+  const sid = hasSid ? argv[argv.indexOf('--session-id') + 1] : (input.includes('RESETME') ? 'sess-2' : 'sess-1');
+  process.stdout.write(JSON.stringify({ type: 'session', sessionId: sid }) + '\\n');
+  process.stdout.write(JSON.stringify({ type: 'assistant', text: '收到：' + input.trim(), sessionId: sid }) + '\\n');
 });
 `);
 
@@ -116,6 +118,16 @@ const errReply = await waitFor(() => sent.slice(before2).find((s) => s.path === 
 check('dsh 失败时回发错误摘要', Boolean(errReply && String(errReply.body.message).includes('出错了')), JSON.stringify(errReply && errReply.body));
 const alive = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/healthz`).then((r) => r.ok).catch(() => false);
 check('dsh 失败后进程仍在线', alive);
+
+// 会话失效：DSH 报 unknown session 时应清映射、无 --session-id 重试一次，而不是永久失败。
+const before3 = sent.length;
+await post({ post_type: 'message', message_type: 'private', self_id: 1, user_id: 90001, message: [{ type: 'text', data: { text: 'RESETME' } }] });
+const resetReply = await waitFor(() => sent.slice(before3).find((s) => s.path === '/send_private_msg'));
+check('失效会话自动重开', Boolean(resetReply && String(resetReply.body.message).includes('收到：RESETME')), JSON.stringify(resetReply && resetReply.body));
+const argv3 = fs.readFileSync(argvLog, 'utf8').trim().split('\n').pop();
+check('重开时不再带旧 session id', !argv3.includes('--session-id'), argv3);
+const saved2 = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+check('新的会话 id 已落盘', saved2['private:90001'] === 'sess-2', JSON.stringify(saved2));
 
 bridge.kill('SIGTERM');
 mock.close();

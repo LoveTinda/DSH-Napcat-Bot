@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Tinda 控制台</title>
+<style>
+  :root{--bg:#0f1115;--panel:#161a21;--line:#242a34;--fg:#e6e6e6;--dim:#8b95a5;--ok:#4ade80;--bad:#f87171;--accent:#7cc4ff}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+  #app{display:flex;flex-direction:column;height:100%}
+  header{display:flex;align-items:center;gap:.75rem;padding:.55rem .8rem;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.02em}
+  .dots{display:flex;gap:.6rem;margin-left:auto;font-size:12px;color:var(--dim)}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#3a4150;margin-right:.3rem;vertical-align:middle}
+  .dot.on{background:var(--ok)} .dot.off{background:var(--bad)}
+  nav{display:flex;gap:.25rem;padding:.4rem .6rem;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto}
+  nav button{background:transparent;border:1px solid transparent;color:var(--dim);padding:.35rem .8rem;border-radius:7px;font:inherit;cursor:pointer;white-space:nowrap}
+  nav button.active{color:var(--fg);background:#1e242e;border-color:var(--line)}
+  main{flex:1;position:relative;min-height:0}
+  iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+  .hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:.6rem;color:var(--dim);text-align:center;padding:1.5rem}
+  #gate{position:fixed;inset:0;background:rgba(8,10,14,.94);display:flex;align-items:center;justify-content:center;padding:1.2rem;z-index:9}
+  #gate .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:1.2rem;max-width:420px;width:100%}
+  #gate input{width:100%;padding:.6rem .7rem;border-radius:8px;border:1px solid var(--line);background:#0d1015;color:var(--fg);font:inherit;margin:.6rem 0}
+  #gate button{width:100%;padding:.6rem;border-radius:8px;border:1px solid var(--accent);background:#13202e;color:var(--accent);font:inherit;cursor:pointer}
+  #gate p{color:var(--dim);font-size:13px;margin:.2rem 0}
+  .hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Tinda 控制台</h1>
+    <div class="dots">
+      <span><i id="d-bridge" class="dot"></i>桥接</span>
+      <span><i id="d-dsh" class="dot"></i>DSH</span>
+      <span><i id="d-napcat" class="dot"></i>NapCat</span>
+    </div>
+  </header>
+  <nav>
+    <button data-k="bridge" class="active">桥接器</button>
+    <button data-k="dsh">DSH</button>
+    <button data-k="napcat">NapCat</button>
+  </nav>
+  <main>
+    <iframe id="view" src="/bridge/" title="面板"></iframe>
+    <div id="off" class="hint hide"><div>这个面板还没起来</div><div id="offmsg" style="font-size:13px"></div></div>
+  </main>
+</div>
+
+<div id="gate">
+  <div class="card">
+    <h3 style="margin:0 0 .4rem">首次使用</h3>
+    <p>请输入访问 token（在设备的 <code>secrets/web.token</code> 里）。</p>
+    <input id="tok" type="password" placeholder="token" autocomplete="off">
+    <button id="go">进入</button>
+    <p id="err" style="color:var(--bad)"></p>
+  </div>
+</div>
+
+<script>
+// 各面板若是独立端口（端点常驻 0 表示没有），就拼绝对地址进去：
+// NapCat/DSH 的前端写死了绝对路径 /webui/assets、/api/…，塞在前缀下面必然白屏。
+const PORTS = { dsh: __P_DSH__, napcat: __P_NAPCAT__ };
+const KEYS = { bridge: '/bridge/', dsh: '/dsh/', napcat: '/napcat/' };
+function panelUrl(k){
+  if (!PORTS[k]) return KEYS[k];
+  return location.protocol + '//' + location.hostname + ':' + PORTS[k] + '/';
+}
+function withToken(u){
+  const t = cookie('tinda');
+  if (!t) return u;
+  return u + (u.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(t);
+}
+const view = document.getElementById('view');
+const off = document.getElementById('off');
+const offmsg = document.getElementById('offmsg');
+
+function cookie(name){ return document.cookie.split(';').map(s=>s.trim()).find(s=>s.startsWith(name+'='))?.split('=')[1] || ''; }
+
+document.querySelectorAll('nav button').forEach(b=>{
+  b.onclick = ()=>{
+    document.querySelectorAll('nav button').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active');
+    switchTo(b.dataset.k);
+  };
+});
+
+function switchTo(k){
+  view.src = withToken(panelUrl(k));
+  view.classList.remove('hide');
+  off.classList.add('hide');
+}
+
+// 支持直达某个面板：?p=napcat 或 #napcat
+(function deepLink(){
+  const q = new URLSearchParams(location.search).get('p');
+  const want = (q || location.hash.replace(/^#/, '')).toLowerCase();
+  if (!KEYS[want]) return;
+  const btn = document.querySelector(`nav button[data-k="${want}"]`);
+  if (btn) btn.click();
+})();
+
+view.addEventListener('load', ()=>{ off.classList.add('hide'); });
+// 下游 502 时 iframe 会显示错误页，这里用状态接口兜底提示
+setInterval(refresh, 4000);
+async function refresh(){
+  try{
+    const r = await fetch('/_/status', {cache:'no-store'});
+    if(r.status === 401){ document.getElementById('gate').classList.remove('hide'); return; }
+    document.getElementById('gate').classList.add('hide');   // 通了就收起输入框，别一直挡着
+    const s = await r.json();
+    for (const k of ['bridge','dsh','napcat']){
+      document.getElementById('d-'+k).className = 'dot ' + (s[k] ? 'on' : 'off');
+    }
+  }catch(e){}
+}
+refresh();
+
+document.getElementById('go').onclick = async ()=>{
+  const t = document.getElementById('tok').value.trim();
+  document.cookie = 'tinda=' + t + '; Path=/; SameSite=Strict';
+  const r = await fetch('/_/status?k=' + encodeURIComponent(t), {cache:'no-store'});
+  if (r.status === 200){ document.getElementById('gate').classList.add('hide'); refresh(); }
+  else { document.getElementById('err').textContent = 'token 不对'; }
+};
+if (cookie('tinda')) document.getElementById('gate').classList.add('hide');
+</script>
+</body>
+</html>

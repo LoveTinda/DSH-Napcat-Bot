@@ -1,6 +1,6 @@
 id=tinda-bot
 name=Tinda Bot
-version=v0.2.17
-versionCode=22
+version=v0.2.18
+versionCode=23
 author=tinda
-description=QQ <-> DSH 桥接器的原生运行载体：开机自启、root 域守护、git 全量可追溯。无 Zygisk、无注入、只监听 Unix socket。
+description=QQ <-> DSH 桥接器的原生运行载体：开机自启、git 全量可追溯、回环 TCP + 8443 带 token 的控制台。无 Zygisk、无进程注入。

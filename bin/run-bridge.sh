@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # 目的：准备环境并 exec 桥接器（units/bridge/bridge.mjs），只做装配不碰业务。
 # 边界：不重试、不探活（supervisor 负责）；不解释配置含义，只搬运。
+# 依赖：node、units/bridge/bridge.mjs、$DATA/etc/tinda.conf、secrets/napcat.token。
 # 输入：tinda.conf 的 BRIDGE_* / NAPCAT_* / DSH_* 键；token 从 secrets 读，不走命令行。
 # 失败：缺 node 或入口 → 78；上游地址非法 → 78。
 # 副作用：无（只读配置、导出环境变量）。

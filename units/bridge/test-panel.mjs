@@ -1,5 +1,6 @@
 // 目的：验证桥接器面板——统计、会话表、事件流、页面本身；不起真实 NapCat、不连 DSH。
 // 边界：只拉起一个 echo 后端的桥接器子进程和一个假的 OneBot API；用临时端口，不碰生产实例。
+// 依赖：node 内置 http/child_process；bridge.mjs；临时端口 6791/3991。
 // 失败：任一断言不过 → 退出码 1，并打印哪一项失败。
 
 import http from 'node:http';
@@ -77,8 +78,14 @@ try {
 
   const html = await (await fetch(base + '/panel/', { headers: { accept: 'text/html' } })).text();
   check('面板页可打开', html.includes('id="cards"') && html.includes('桥接器'));
-  check('面板用相对路径取状态', html.includes('panel/state.json'));
+  check('面板用相对路径取状态', html.includes("new URL('state.json'"));
   check('面板不内联聊天内容', !html.includes('__secret_text__'));
+  check('面板不再用横向滚动表格', !html.includes('<table'));
+  check('面板有手动刷新与离线错误条', html.includes('id="refresh"') && html.includes('id="notice"'));
+  check('根路径也返回面板 HTML', (await (await fetch(base + '/')).text()).includes('id="cards"'));
+  check('/state.json 与 /panel/state.json 等价', (await (await fetch(base + '/state.json')).json()).ok === true);
+  const head = await fetch(base + '/healthz', { method: 'HEAD' });
+  check('HEAD /healthz 可用', head.status === 200 && (await head.text()) === '');
 
   // 私聊一条
   const post = await fetch(base + '/', {
@@ -111,6 +118,8 @@ try {
   const skipped = await (await fetch(base + '/panel/state.json')).json();
   check('空消息计入跳过', skipped.counts.skipped === 1);
   check('空消息不回发', sent.length === before);
+  check('跳过事件进入事件流', skipped.events.some((e) => e.status === 'skip' && /空消息/.test(e.note)));
+  check('面板统计包含跳过卡片', (await (await fetch(base + '/panel/')).text()).includes('跳过'));
 } catch (e) {
   fail++;
   console.log('FAIL  异常：' + e.message);

@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # 目的：在 **proot 宿主环境内直接** 安装 QQNT + NapCat（不走 chroot 容器），并写好启动入口。
 # 边界：不改桥接器、不登录账号（扫码必须人工）、不联网下载（安装包必须已在本机）。
+# 依赖：bash/ar/tar/unzip、本机安装包、/opt/QQ 与 /opt/napcat。
 # 输入：--from <目录> 安装包目录（默认 /sdcard/Download/DSH-Go/napcat-install），
 #       目录里需有 *linuxqq*arm64*.deb 与 NapCat*.zip；也可用 --qq / --napcat 指定。
 # 失败：缺包/架构不对/解不开 → 78，并说明缺什么。

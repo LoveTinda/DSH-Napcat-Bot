@@ -10,7 +10,5 @@
     "超时必须抛错或返回明确超时标记，由调用方决定降级",
     "不得在请求里记录明文 key"
   ],
-  "implementedBy": [
-    "app/src/model.js"
-  ]
+  "implementedBy": []
 }

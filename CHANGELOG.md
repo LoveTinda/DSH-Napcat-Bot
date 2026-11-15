@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## v0.2.18
+- **Bridge 面板重做**：会话/事件改成手机优先卡片（不再用需要横向滚动的表格）；
+  配置页按组展示只读键值；事件支持成功/失败/跳过筛选；补手动刷新、自动刷新暂停、
+  离线/401/超时错误条；会话 id 可复制；增加“跳过”计数与事件
+- **修面板真实 bug**：页面直接开 `/panel/` 时，原代码会去取 `/panel/panel/state.json` 而永远
+  连不上；现在页面相对取 `state.json`，桥接器同时提供 `/state.json` 与 `/panel/state.json`，
+  `/`、`/panel/`、`/bridge/` 三种挂载都通；`GET /` 固定返回 HTML，`/healthz` 固定 JSON
+- **网关安全**：`WEB_TOKEN` 为空直接拒绝启动（`WEB_ALLOW_NO_TOKEN=1` 仅本机调试）；
+  cookie 改 HttpOnly，导航页不再把 token 拼进 iframe URL，`?k=` 加载后从地址栏抹掉；
+  转发给下游前去掉 `tinda` cookie；`/logout` 清 cookie；`/bridge` 补 308 斜杠；
+  DSH 401 只在 HTML 请求时换说明页，API 请求原样透传
+- **桥接器健壮性**：DSH 会话失效（unknown session）自动清映射并重开一次；
+  子进程提前退出时接住 stdin EPIPE，不再拖垮整个桥接器；DSH 输出/stderr 有上限；
+  事件备注先脱敏再截断；SIGTERM 时一并收掉正在跑的 DSH 子进程；端口占用打印原因后退出
+- **配置**：删除从未实现的 `BRIDGE_PANEL_PORT` 死键（面板与桥接器同端口，网关从
+  `BRIDGE_LISTEN` 推导）；`ensure_dirs` 从 example 补缺键且不覆盖已有值；
+  修复 `grep -F "^KEY="` 把 `^` 当字面量导致配置永远读不到、并反复追加重复键的 bug；
+  token 空文件会补成 32 位十六进制；证书 SAN 不覆盖当前 IP 时自动重签；`WEB_HTTP_PORT` 真正接线
+- **清理**：删除无法通过 `node --check`、且缺 `dsh/model/onebot/store` 实现的旧 `app/`，
+  以及指向它的 `bin/run-bot.sh`、旧 bare 仓库脚本 `setup-git.sh`/`autocommit.sh`；
+  契约检查器迁到 `bin/check-contracts.mjs`，契约 `implementedBy` 清空并如实告警；
+  新增 `bin/install-hooks.sh`；`snapshot.sh` 修成全项目快照（以前漏掉 bin/units/contracts）
+- **测试**：新增 `units/web/test-gateway.mjs`（16 项：鉴权/cookie/反代/401/失败关闭）；
+  `test-panel` 扩到 23 项；`test-headless` 扩到 12 项（含会话失效重开）
+- 文档同步：README / RUNBOOK / 配置说明 / 安全模型 / 生产就绪清单 / 接口与适配 / ADR-0004
+  / contracts README；`module.prop` 修正「只监听 Unix socket」的过期描述并升到 v0.2.18
+
 ## v0.2.17
 - 备份瘦身与可恢复：备份前 `git gc`，`.git` 从 404 个散对象文件降到 31 个
   （一次备份 681 → 322 个文件）；额外生成单文件 `repo.bundle`（220KB），
