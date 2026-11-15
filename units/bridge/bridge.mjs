@@ -177,7 +177,22 @@ function body(req, limit = 2 * 1024 * 1024) {
 
 const server = http.createServer(async (req, res) => {
   const url = req.url || '/';
-  if (req.method === 'GET' && (url === '/healthz' || url === '/')) {
+  // 用 pathname 判断，查询串（例如网关带过来的 ?k=）不能影响路由
+  const pathname = new URL(url, 'http://127.0.0.1').pathname;
+  if (req.method === 'GET' && (pathname === '/healthz' || pathname === '/')) {
+    const wantsHtml = String(req.headers.accept || '').includes('text/html');
+    if (pathname === '/' && wantsHtml) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(`<!doctype html><meta charset="utf-8"><title>桥接器</title>
+<style>body{font:14px/1.6 system-ui,sans-serif;margin:0;padding:24px;background:#0f1115;color:#e6e6e6}
+b{color:#7dd3fc}code{background:#1b1f27;padding:2px 6px;border-radius:4px}</style>
+<h3>桥接器 · 运行中</h3>
+<p>后端：<b>${cfg.backend}</b></p>
+<p>监听：<code>${cfg.listen}</code></p>
+<p>上游 NapCat：<code>${cfg.napcatApi}</code></p>
+<p style="opacity:.6">会话按聊天隔离；消息进来时这里会打印处理结果（见 logs/bridge.log）。</p>`);
+      return;
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ ok: true, backend: cfg.backend, listen: cfg.listen }));
     return;

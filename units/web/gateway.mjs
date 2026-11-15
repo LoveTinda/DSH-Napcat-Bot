@@ -99,7 +99,14 @@ function handler(req, res) {
   const target = { host: up.host, port: up.port, path: subPath + url.search, method: req.method, headers: { ...req.headers, host: `${up.host}:${up.port}` } };
 
   const proxy = http.request(target, (upRes) => {
-    res.writeHead(upRes.statusCode || 502, upRes.headers);
+    // 下游可能用绝对路径重定向（例如 NapCat 的 / → /webui），要补回本网关的前缀，
+    // 否则浏览器会跑到网关根下去，落到 404。
+    const headers = { ...upRes.headers };
+    const loc = headers.location;
+    if (typeof loc === 'string' && loc.startsWith('/') && !loc.startsWith(prefix)) {
+      headers.location = prefix.replace(/\/$/, '') + loc;
+    }
+    res.writeHead(upRes.statusCode || 502, headers);
     upRes.pipe(res);
   });
   proxy.on('error', (e) => {
