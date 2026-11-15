@@ -3,7 +3,7 @@
 # 边界：静态检查，不修复；不解析 JS 语义。
 # 失败：有违规返回 1，供 pre-commit 拦截。
 # 检查：unit.conf 必需字段、是否存在跨单元路径引用、单元目录内是否有跨单元 import。
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 UNITS=${UNITS:-$MODDIR/units}
 bad=0
 

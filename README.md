@@ -1,48 +1,77 @@
-# Tinda Bot（原生运行载体）
+# Tinda Bot
 
-目的：把 QQ ↔ DSH 桥接器从「Termux + proot」搬到设备原生环境，开机自启、root 域守护、改动全部进 git。
+QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，桥接器在中间搬运；
+所有改动进 git，每次更新落一份完整备份到 `/sdcard/backup/`。
 
-**先读**：`docs/编码规范.md`（三条铁律）、`docs/adr/`（为什么这么设计）。
+**现在能做什么**：QQ 私聊/群聊发消息 → 桥接器 → `dsh headless` → 回到 QQ；网页控制台看三个面板；
+每轮续接同一个 DSH 会话。
+
+**还没做什么**：`/output` 分档、完整 `/help` 命令表、群上下文注入、DSH 独立容器、Magisk 打包实测。
+
+## 先读这两篇
+
+- `docs/操作手册.md` —— 现在这台机器上怎么起、怎么查、怎么修（每条命令都实跑过）
+- `docs/配置说明.md` —— 真的存在的配置项，以及端口表
 
 ## 目录
-```
-module.prop        模块声明
-customize.sh       安装时建目录、摆权限
-service.sh         开机启动 supervisor
-uninstall.sh       卸载时停进程、保留运行态
-bin/               模块自带脚本
-app/               桥接器源码（git 工作树）
-docs/              规范 / ADR / 配置说明
-originals/         只读原文件快照
-```
 
-## 运行态（不入模块目录）
 ```
-/data/adb/tinda-bot/state    会话、档位、水位
-/data/adb/tinda-bot/logs     日志（按天，50MB 轮转）
-/data/adb/tinda-bot/secrets  token / accessToken / git 凭据（0600）
-/data/adb/tinda-bot/repo.git git bare 仓库
+module.prop        模块声明（Magisk 形态用）
+service.sh         开机按单元拉起
+bin/               启动、看守、门禁、备份、安装、诊断
+units/             单元：napcat / bridge / web / dsh，各自 unit.conf + 入口
+contracts/         抽象接口契约（与 units/ 一一对应）
+docs/              操作手册 / 配置 / 规范 / ADR
+originals/         原文件快照（只读）
+etc/               配置模板
 ```
 
-## 远端仓库
+`$DATA` 判定：`/data/adb/tinda-bot` 存在就是 Magisk 形态，否则用仓库内 `.runtime/`（当前是这种）。
 
-`git@github.com:LoveTinda/DSH-Napcat-Bot.git`（分支 `main`）
+## 三个地址
 
-本机到 GitHub 的 22 端口被阻断，`~/.ssh/config` 里已把 `github.com` 映射到
-`ssh.github.com:443`，所以直接 `git push` 即可，不需要额外参数。
+| 入口 | 用途 |
+| --- | --- |
+| `https://<局域网IP>:8443/?k=<web.token>` | 控制台：桥接器面板 / DSH / NapCat 三标签 |
+| `https://<局域网IP>:8445/` | NapCat WebUI（独立端口，因为它的前端用绝对路径） |
+| `https://<局域网IP>:8444/` | DSH 面板（进不去，显示说明页——它只认自己打印的授权链接） |
 
-## Web 控制台
-
-`https://<局域网IP>:8443/`
-
-- 首页是导航页，默认内嵌**桥接器**面板，可切到 DSH / NapCat
-- 首次打开会要求输入 token（`/data/adb/tinda-bot/secrets/web.token`）
-- 顶部三个状态灯来自 `/_/status`；下游没起来时对应灯是灰的
-- 明文 8088 会 301 跳到 8443
+token 在 `$DATA/secrets/web.token`。
 
 ## 常用命令
+
+```sh
+sh bin/doctor.sh                 # 一条命令看通没通（单元/端口/OneBot/面板/网关/备份/git）
+sh bin/unit.sh status web        # 单元状态：start|stop|restart|status|logs
+sh bin/unit.sh logs bridge 40
+sh bin/napcat-wire-onebot.sh     # 把 OneBot 接到桥接器（改完要重启 napcat）
+sh bin/backup-to-sdcard.sh       # 完整备份到 /sdcard/backup/
 ```
-su -c 'sh /data/adb/modules/tinda-bot/bin/supervisor.sh start'
-su -c 'sh /data/adb/modules/tinda-bot/bin/snapshot.sh "改配置前"'
-su -c 'sh /data/adb/modules/tinda-bot/bin/autocommit.sh --once "feat: xxx"'
+
+改完代码的三道门：
+
+```sh
+MODDIR=$PWD sh bin/check-headers.sh
+MODDIR=$PWD sh bin/check-independence.sh
+MODDIR=$PWD sh bin/check-contracts.sh
 ```
+
+## 远端
+
+`git@github.com:LoveTinda/DSH-Napcat-Bot.git`（`main`）。到 GitHub 的 22 端口被阻断，
+`~/.ssh/config` 已把 `github.com` 映射到 `ssh.github.com:443`，直接 `git push` 即可。
+
+## 文档索引
+
+| 文档 | 内容 |
+| --- | --- |
+| `docs/操作手册.md` | 当前真实操作流程、排障对照表 |
+| `docs/配置说明.md` | 配置文件、环境变量、端口、敏感文件 |
+| `docs/napcat-安装.md` | QQ + NapCat 宿主直装、注入原理、常见坑 |
+| `docs/编码规范.md` | 三条铁律、命名、提交信息格式 |
+| `docs/独立性.md` | 单元之间为什么不能互相 import |
+| `docs/生命周期.md` | 启动/退避重启/停止的语义 |
+| `docs/安全模型.md` | token、权限、脱敏、边界 |
+| `docs/生产就绪清单.md` | 上线前还差什么 |
+| `docs/adr/` | 关键决策记录 |
+| `docs/历史-变更记录.md` | 重写前那套 `config.json` 的记录（不再是当前实现） |

@@ -70,16 +70,73 @@ rm -rf /opt/napcat
 mv /opt/napcat.new /opt/napcat
 chmod +x /opt/napcat/*.sh 2>/dev/null
 
-# 4) 启动入口：无显示器环境必须套 xvfb-run，否则 QQ 起不来
+# 4) 注入：把 QQ 的入口指向 tinda-launcher.js，由它在 QQ 主进程里 import NapCat。
+#    没有这一步，NapCat 单跑会 `wrapper.node: undefined symbol: qq_magic_napi_register`。
+APP_JSON=/opt/QQ/resources/app/package.json
+LAUNCHER=/opt/QQ/resources/app/tinda-launcher.js
+if [ -f "$APP_JSON" ]; then
+  [ -f "$APP_JSON.tinda-orig" ] || cp -a "$APP_JSON" "$APP_JSON.tinda-orig"
+  cat > "$LAUNCHER" <<'EOL'
+// tinda-bot：QQ 主进程入口包装，负责把 NapCat 加载进同一个进程。
+// 为什么要包一层：NapCat 的 wrapper.node 依赖 QQ 可执行文件导出的符号（qq_magic_napi_register），
+// 只能从 QQ 主进程里加载，单独跑 node 会 undefined symbol。
+const fs = require('fs');
+const log = (m) => { try { fs.appendFileSync('/tmp/tinda-inject.log', new Date().toISOString() + ' ' + m + '\n'); } catch (e) {} };
+log('launcher 启动');
+require('./application.asar/app_launcher/index.js');
+log('QQ 入口已加载');
+
+// 快速登录：NapCat 只认命令行参数里的 -q <uin>；从 QQ 启动时拿不到，
+// 所以按「已登录过的账号」补上去，免得每次重启都重新扫码。
+function quickLoginUin() {
+  if (process.env.NAPCAT_QUICK_LOGIN) return String(process.env.NAPCAT_QUICK_LOGIN).trim();
+  try {
+    const path = require('path');
+    const dir = '/opt/napcat/config';
+    return fs.readdirSync(dir)
+      .map((f) => (f.match(/^onebot11_(\d+)\.json$/) || [])[1])
+      .filter(Boolean)
+      .map((u) => ({ u, t: fs.statSync(path.join(dir, 'onebot11_' + u + '.json')).mtimeMs }))
+      .sort((a, b) => b.t - a.t)[0]?.u || '';
+  } catch (e) { return ''; }
+}
+
+setTimeout(() => {
+  const uin = quickLoginUin();
+  if (uin && !process.argv.includes('-q')) {
+    process.argv.push('-q', uin);
+    log('注入快速登录 -q ' + uin);
+  } else if (!uin) {
+    log('没有可快速登录的账号，走扫码');
+  }
+  log('开始加载 NapCat');
+  import('file:///opt/napcat/napcat.mjs')
+    .then(() => log('NapCat 模块已导入'))
+    .catch((e) => log('NapCat 导入失败: ' + (e && (e.stack || e.message))));
+}, 2000);
+EOL
+  # main 指到 launcher（用 node 改 JSON，避免手写 JSON 出错）
+  NODE_BIN="$MODDIR/bin/node"; [ -x "$NODE_BIN" ] || NODE_BIN=$(command -v node)
+  "$NODE_BIN" -e '
+const fs=require("fs");
+const p=process.argv[1];
+const j=JSON.parse(fs.readFileSync(p,"utf8"));
+j.main="./tinda-launcher.js";
+fs.writeFileSync(p,JSON.stringify(j,null,2));
+' "$APP_JSON" || { log error "改 $APP_JSON 失败"; exit 78; }
+  log info "已注入：$APP_JSON main → ./tinda-launcher.js"
+else
+  log warn "没有 $APP_JSON，跳过注入（QQ 包结构变了？）"
+fi
+
+# 5) 启动入口：统一交给模块脚本，避免这里和 bin/napcat-start-host.sh 各写一份、慢慢走样。
+#    关键点：NapCat 必须从 QQ 主进程里加载（wrapper.node 要 QQ 导出的符号），
+#    所以不能 `node napcat.mjs` 单独跑。
 cat > /opt/napcat/start-tinda.sh <<'EOS'
 #!/bin/sh
-# 目的：无头环境启动 NapCat（Xvfb 提供虚拟显示）。由单元管理器拉起，不重试。
-# 失败：非 0 退出即由 supervisor 退避重启。
+# 目的：兼容旧的调用方；真正的启动逻辑在模块里。
 set -u
-cd /opt/napcat || exit 78
-export HOME=/opt/napcat
-export NODE_OPTIONS=
-exec xvfb-run -a -s "-screen 0 1280x800x24" /usr/bin/env node napcat.mjs "$@"
+exec sh /data/adb/modules/tinda-bot/bin/napcat-start-host.sh "$@"
 EOS
 chmod +x /opt/napcat/start-tinda.sh
 

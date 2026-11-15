@@ -5,7 +5,7 @@
 # 失败：/sdcard 不可写 → 退出 78；拷贝后文件数为 0 → 删除半成品并退出 1。
 # 保留策略：默认保留最近 20 份完整备份，最新一份永不删除。
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 DEST_ROOT=${DEST_ROOT:-/sdcard/backup}
 KEEP=${KEEP:-20}
 

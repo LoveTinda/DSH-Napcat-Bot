@@ -5,7 +5,7 @@
 # 失败：单元未声明/入口缺失 → 78；外部单元不可 start → 明确拒绝。
 # 副作用：写本单元的 PID/日志/状态目录（绝不碰别人的）。
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 UNITS=${UNITS:-$MODDIR/units}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
@@ -79,7 +79,18 @@ case "$act" in
   start) do_start ;;
   stop) do_stop ;;
   restart) do_stop; do_start ;;
-  status) if running; then echo "$name: running pid=$(cat "$PID_FILE")"; else echo "$name: stopped"; fi ;;
+  status)
+    if running; then echo "$name: running pid=$(cat "$PID_FILE")"; exit 0; fi
+    # 外部单元没有我们的 PID，只能探活；能连上就算在跑。
+    # 本机没有 curl/wget，用 node 探（模块自带 node 优先）。
+    if [ "$TYPE" = "external" ] && [ -n "${PROBE_URL:-}" ]; then
+      _n="$MODDIR/bin/node"; [ -x "$_n" ] || _n=$(command -v node)
+      if [ -n "$_n" ] && "$_n" -e 'fetch(process.argv[1],{signal:AbortSignal.timeout(2000)}).then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))' "$PROBE_URL" 2>/dev/null; then
+        echo "$name: running (external, $PROBE_URL 可连)"; exit 0
+      fi
+      echo "$name: stopped (external, $PROBE_URL 连不上)"; exit 0
+    fi
+    echo "$name: stopped" ;;
   logs) tail -n "${3:-40}" "$LOG_FILE" 2>/dev/null || echo "无日志" ;;
   *) echo "未知动作：$act"; exit 2 ;;
 esac

@@ -5,7 +5,7 @@
 # 失败：未配置 UID 或 uid 非 root 时直接退出 78（宁可不起，也不要 root 跑业务）
 # 副作用：切换 uid、设置资源上限、写启动日志
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 log_rotate

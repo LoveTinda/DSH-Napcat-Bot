@@ -10,6 +10,8 @@ until [ "$(getprop sys.boot_completed)" = "1" ]; do sleep 2; done
 sleep 20
 mkdir -p "$DATA/logs"
 
-for u in napcat dsh bridge; do
+# 顺序：NapCat（OneBot 服务端）→ 桥接器（找它要 3001）→ 网关（找桥接器要面板口）。
+# dsh 是外部单元，start 只做提示，不拉起别人的进程。
+for u in napcat dsh bridge web; do
   MODDIR="$MODDIR" sh "$MODDIR/bin/unit.sh" start "$u"
 done

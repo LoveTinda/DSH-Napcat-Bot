@@ -3,8 +3,17 @@
 # 边界：不做业务逻辑；不保证并发安全（调用方自己加锁）。
 # 失败：配置缺失用缺省值并记 warn；写入失败必须显式返回非 0，禁止静默吞掉。
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
-DATA=${DATA:-/data/adb/tinda-bot}
+# 两种运行形态：
+#   1) Magisk 模块：MODDIR=/data/adb/modules/tinda-bot，DATA=/data/adb/tinda-bot（service.sh 会传）
+#   2) 开发/无 root：直接在仓库里跑，退回到仓库目录 + 仓库内 .runtime
+# 判据是「模块目录在不在」，不看用户名或路径猜测。
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)}
+# 数据目录：Magisk 形态用 /data/adb/tinda-bot；没有这个路径就退到模块内 .runtime。
+if [ -d /data/adb/tinda-bot ] || [ ! -w "$(dirname "$MODDIR")" ]; then
+  DATA=${DATA:-/data/adb/tinda-bot}
+else
+  DATA=${DATA:-$MODDIR/.runtime}
+fi
 CONF=${CONF:-$DATA/etc/tinda.conf}
 
 # 目的：日志里禁止出现 token / 密钥 / 手机号等敏感串。
@@ -37,6 +46,10 @@ ensure_dirs() {
   umask 077
   mkdir -p "$DATA/state" "$DATA/logs" "$DATA/run" "$DATA/secrets" "$DATA/etc"
   chmod 700 "$DATA/secrets" "$DATA/state" 2>/dev/null
+  # 首次就把配置铺出来，别让「改哪个键」只存在于 example 里。已存在不覆盖。
+  if [ ! -f "$CONF" ] && [ -f "$MODDIR/etc/tinda.conf.example" ]; then
+    cp "$MODDIR/etc/tinda.conf.example" "$CONF" 2>/dev/null && chmod 600 "$CONF" 2>/dev/null
+  fi
 }
 
 # 目的：状态文件必须原子落盘，避免断电/被杀留下半截 JSON（这次事故的同类风险）。

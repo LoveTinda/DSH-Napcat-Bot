@@ -4,7 +4,7 @@
 # 输入：$1 = 原因（写进目录名与 INDEX）
 # 副作用：写 originals/<时间戳>-<原因>/ 与 originals/INDEX.md
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 

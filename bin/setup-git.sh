@@ -4,7 +4,7 @@
 # 输入：$1 = 远端 URL（可选，如 git@github.com:you/tinda-bot.git）
 # 副作用：创建 $DATA/repo.git、修改 app/.gitignore、首次提交
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 

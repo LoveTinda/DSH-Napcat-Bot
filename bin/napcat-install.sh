@@ -9,7 +9,7 @@
 # 失败：缺包 → 列出缺什么并退出 78（不猜、不联网乱下）。
 # 副作用：写容器内 /opt/napcat、宿主 secrets 与配置。
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 

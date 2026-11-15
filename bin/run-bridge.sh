@@ -5,7 +5,7 @@
 # 失败：缺 node 或入口 → 78；上游地址非法 → 78。
 # 副作用：无（只读配置、导出环境变量）。
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 

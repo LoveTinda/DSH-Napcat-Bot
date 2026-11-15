@@ -4,7 +4,7 @@
 # 输入：--once "<message>"  或  （无参）常驻监听模式
 # 副作用：git 提交、可能的 push、$DATA/logs/git.log
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 

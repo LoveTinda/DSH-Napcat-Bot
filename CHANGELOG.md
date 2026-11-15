@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## v0.2.15
+- 文档按当前真实流程重写：新增 `docs/操作手册.md`（九节，每条命令都实跑过），
+  `README.md` 重写，`docs/配置说明.md` 只留真实存在的配置
+- 旧实现的记录归档到 `docs/历史-变更记录.md`；`docs/命令表-help原文.md`、
+  `docs/output-模式.md` 标注为「未实现素材」；生命周期/安全模型/生产就绪清单/接口与适配按现状改写
+- `etc/tinda.conf.example` 对齐代码：删掉 PORT_MODE/SOCKET_PATH/NAPCAT_WS_* 等已不读的键，
+  补上 BRIDGE_* / NAPCAT_API / WEB_*_ORIGIN_PORT 等真在用的键
+- `bin/lib.sh`：`$DATA` 按「/data/adb/tinda-bot 在不在」判定，仓库内直跑退到 `.runtime/`；
+  首次运行自动把 example 铺成 `$DATA/etc/tinda.conf`
+- `bin/unit.sh`：外部单元状态改为探活（`PROBE_URL`），本机没有 curl 时用 node 探
+- `service.sh`：之前漏了 `web` 单元，开机不会拉起控制台，补上并写明顺序
+- `bin/doctor.sh` 重写：环境/权限/单元/端口/OneBot/面板/网关/备份/git/最近错误十段，任一项 FAIL 退出码 1
+- `units/napcat/unit.conf` 从容器改回真实形态（`TYPE=exec` + `bin/napcat-start-host.sh`）
+- `bin/napcat-install-host.sh` 补上注入步骤（写 launcher、改 `package.json` 的 `main`）；
+  更正文档里「安装会编 gnutls-shim」的说法——QQ 3.2.34 下不需要
+
 ## v0.2.14
 - 接通 NapCat 的 OneBot 11：`bin/napcat-wire-onebot.sh` 写 `httpServers`（127.0.0.1:3001，带 token）
   和 `httpClients`（事件推送到桥接器 6700），token 落在 `$DATA/secrets/napcat.token`（0600）

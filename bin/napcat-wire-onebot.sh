@@ -5,7 +5,7 @@
 # 失败：找不到 onebot11_<uin>.json（说明还没登录过）→ 78；写文件失败 → 78。
 # 副作用：写 onebot11 配置与 token 文件（0600）。改完必须重启 NapCat 才生效，本脚本不重启。
 
-MODDIR=${MODDIR:-/data/adb/modules/tinda-bot}
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 
