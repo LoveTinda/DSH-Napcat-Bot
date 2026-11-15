@@ -24,6 +24,10 @@ export WEB_TOKEN="$(cat "$TOKEN_FILE")"
 export WEB_BIND="$(conf_get WEB_BIND 0.0.0.0)"
 export WEB_PORT="$(conf_get WEB_PORT 8443)"
 export WEB_REDIRECT_PORT="$(conf_get WEB_REDIRECT_PORT 8088)"
+# 各面板的「根路径端口」：DSH 和 NapCat 前端写死绝对路径 /api、/assets、/webui，
+# 只有给它们各自的端口才能正常加载。0 = 不开。
+export WEB_DSH_ORIGIN_PORT="$(conf_get WEB_DSH_ORIGIN_PORT 8444)"
+export WEB_NAPCAT_ORIGIN_PORT="$(conf_get WEB_NAPCAT_ORIGIN_PORT 8445)"
 [ -f "$CERT" ] && { export WEB_TLS_CERT="$CERT"; export WEB_TLS_KEY="$KEY"; }
 
 # NapCat 的 WebUI 有自己的一套 token，网关自动带给它，用户不用再手输一次。

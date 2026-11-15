@@ -60,7 +60,19 @@
 </div>
 
 <script>
+// 各面板若是独立端口（端点常驻 0 表示没有），就拼绝对地址进去：
+// NapCat/DSH 的前端写死了绝对路径 /webui/assets、/api/…，塞在前缀下面必然白屏。
+const PORTS = { dsh: __P_DSH__, napcat: __P_NAPCAT__ };
 const KEYS = { bridge: '/bridge/', dsh: '/dsh/', napcat: '/napcat/' };
+function panelUrl(k){
+  if (!PORTS[k]) return KEYS[k];
+  return location.protocol + '//' + location.hostname + ':' + PORTS[k] + '/';
+}
+function withToken(u){
+  const t = cookie('tinda');
+  if (!t) return u;
+  return u + (u.includes('?') ? '&' : '?') + 'k=' + encodeURIComponent(t);
+}
 const view = document.getElementById('view');
 const off = document.getElementById('off');
 const offmsg = document.getElementById('offmsg');
@@ -76,7 +88,7 @@ document.querySelectorAll('nav button').forEach(b=>{
 });
 
 function switchTo(k){
-  view.src = KEYS[k];
+  view.src = withToken(panelUrl(k));
   view.classList.remove('hide');
   off.classList.add('hide');
 }

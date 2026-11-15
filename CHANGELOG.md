@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v0.2.12
+- 三个面板各自独立端口：`WEB_DSH_ORIGIN_PORT`（默认 8444）、`WEB_NAPCAT_ORIGIN_PORT`（默认 8445），
+  根路径直通下游。DSH 与 NapCat 的前端都写死绝对路径（`/webui/assets`、`/api/…`），挤在 8443 的前缀
+  下面必然白屏，改了前缀也改不动它们编译好的产物
+- 导航页按端口拼 iframe 地址（`PORTS` 由网关注入），并带上 `?k=` 让独立端口也能认人
+- NapCat 的 `token` 查询参数只补给页面请求，不补给 `/api/*`：实测 `/api/auth/login?token=…`
+  会让它直接返回 `Unauthorized`，面板因此一直白屏
+- DSH 的 401 由网关换成有说明的 HTML 页，不再给 iframe 一片空白
+- 删除网关里「cookie 加 HttpOnly」的做法：页面自己要用 `document.cookie` 判断登录态
+
 ## v0.2.11
 - 桥接器最小实现 `units/bridge/bridge.mjs`：OneBot 11 HTTP 事件入口（`POST /`）+ `GET /healthz`，
   回发走 OneBot HTTP API（`send_private_msg` / `send_group_msg`），同一聊天串行排队
