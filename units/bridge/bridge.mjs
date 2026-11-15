@@ -646,6 +646,8 @@ server.on('error', (e) => {
 });
 // 补发：启动时先恢复上次的队列并试一轮，之后按 BRIDGE_SEND_DRAIN_MS 轮询。
 loadOutbox();
+// 面板/doctor 一打开就该看到磁盘占用，别等 5 分钟后的第一次定时检查。
+lastDiskPercent = diskUsedPercent(dataDir);
 setTimeout(() => { drainOutbox().catch((e) => log('warn: 补发轮询异常', redactText(e.message))); }, 1000).unref();
 setInterval(() => { drainOutbox().catch((e) => log('warn: 补发轮询异常', redactText(e.message))); }, cfg.drainMs).unref();
 
