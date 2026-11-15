@@ -101,11 +101,18 @@ function handler(req, res) {
   }
 
   // 5) 反代
-  const prefix = Object.keys(UPSTREAMS).find((p) => url.pathname.startsWith(p));
+  // NapCat 的 WebUI 是 SPA，前端资源用绝对路径 /webui/assets/…（不带 /napcat 前缀）。
+  // 在 iframe 里这些请求会落到网关根下，必须单独认领，否则面板一片空白。
+  let prefix = Object.keys(UPSTREAMS).find((p) => url.pathname.startsWith(p));
+  let upstreamPath = null;
+  if (!prefix && (url.pathname === '/webui' || url.pathname.startsWith('/webui/'))) {
+    prefix = '/napcat/';
+    upstreamPath = url.pathname;
+  }
   if (!prefix) { res.writeHead(404); return res.end('not found'); }
 
   const up = UPSTREAMS[prefix];
-  const subPath = url.pathname.slice(prefix.length - 1) || '/';
+  const subPath = upstreamPath ?? (url.pathname.slice(prefix.length - 1) || '/');
   // NapCat 的 WebUI 自带一套 token，和网关的 token 是两回事。
   // 这里自动补上，免得用户打开面板还要手输一次。
   let search = url.search;
