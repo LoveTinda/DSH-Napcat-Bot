@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## v0.2.11
+- 桥接器最小实现 `units/bridge/bridge.mjs`：OneBot 11 HTTP 事件入口（`POST /`）+ `GET /healthz`，
+  回发走 OneBot HTTP API（`send_private_msg` / `send_group_msg`），同一聊天串行排队
+- DSH 后端适配层：每轮 spawn `dsh headless --json`，任务走 stdin，会话 id 落盘后下一轮 `--session-id` 续接
+- 自带两套自测：`units/bridge/test-roundtrip.mjs`（回路 11 项）、`units/bridge/test-headless.mjs`（适配层 9 项）
+- 新增 `bin/run-bridge.sh`（装配环境后 exec，不重试不探活）与 `bin/rootfs-clone.sh`（硬链接克隆 rootfs）
+- 桥接器接入单元管理：`units/bridge/unit.conf` → `bin/run-bridge.sh`，`HEALTH_PORT=6700`
+
+## v0.2.5 – v0.2.10
+- v0.2.5 每次更新落一份完整目录到 `/sdcard/backup`（含 `.git`、`originals/`，保留 20 份，`SHA256SUMS` 自校验）
+- v0.2.6 补齐头注释与模块级配置文档、各加一道可执行门禁，补 `2026-11-15` 变更记录
+- v0.2.7 接入 GitHub 远端；22 端口被封，改走 `ssh.github.com:443`
+- v0.2.8 NapCat 离线优先的容器内安装器与安装文档
+- v0.2.9 本机构建 NapCat rootfs（ubuntu 24.04 + node 24 + Qt 运行时依赖）
+- v0.2.10 NapCat 降级为外部依赖：模块只拉起、探活、退避重启，不参与登录/版本/配置
+
 ## v0.2.4
 - 新增统一导航页 `units/web/ui/index.html`：默认内嵌桥接面板，左侧切换 DSH / NapCat
 - 首次打开显示 token 引导（不需要带 ?k= 参数先看页面）
