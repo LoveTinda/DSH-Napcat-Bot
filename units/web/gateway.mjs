@@ -69,7 +69,7 @@ function handler(req, res) {
   // 表现就是「控制台里点哪个标签都打不开」。
   if (TOKEN && url.searchParams.get('k') === TOKEN) {
     const secure = useTls ? '; Secure' : '';
-    res.setHeader('set-cookie', `tinda=${TOKEN}; Path=/; HttpOnly; SameSite=Lax${secure}`);
+    res.setHeader('set-cookie', `tinda=${TOKEN}; Path=/; SameSite=Lax${secure}`);
   }
 
   // 1) 健康检查：不鉴权，只回 ok

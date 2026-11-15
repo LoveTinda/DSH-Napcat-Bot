@@ -97,6 +97,7 @@ async function refresh(){
   try{
     const r = await fetch('/_/status', {cache:'no-store'});
     if(r.status === 401){ document.getElementById('gate').classList.remove('hide'); return; }
+    document.getElementById('gate').classList.add('hide');   // 通了就收起输入框，别一直挡着
     const s = await r.json();
     for (const k of ['bridge','dsh','napcat']){
       document.getElementById('d-'+k).className = 'dot ' + (s[k] ? 'on' : 'off');
