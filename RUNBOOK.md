@@ -70,7 +70,7 @@ sh bin/doctor.sh
 成功时末尾是：
 
 ```console
-ok    OneBot uid=3876238785 nick=Love Tindaᯠ ⑅ ᯄ
+ok    OneBot uid=<QQ号> nick=<QQ昵称>
 ok    ok backend=headless 收到=4 成功=3 失败=1 跳过=3
 ok    网关 {"dsh":true,"bridge":true,"napcat":true}
 
@@ -154,7 +154,7 @@ https://<局域网IP>:8443/?k=<$DATA/secrets/web.token>
 在导入 NapCat 前往 `process.argv` 补 `-q <uin>`。日志里出现：
 
 ```
-正在快速登录  3876238785
+正在快速登录  <QQ号>
 [Notice] [OneBot11] [network] 配置加载
 ```
 
