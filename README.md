@@ -10,7 +10,7 @@ QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，�
 
 ## 先读这两篇
 
-- `docs/操作手册.md` —— 现在这台机器上怎么起、怎么查、怎么修（每条命令都实跑过）
+- `RUNBOOK.md` —— 现在这台机器上怎么起、怎么查、怎么修（每条命令都实跑过）
 - `docs/配置说明.md` —— 真的存在的配置项，以及端口表
 
 ## 目录
@@ -21,7 +21,9 @@ service.sh         开机按单元拉起
 bin/               启动、看守、门禁、备份、安装、诊断
 units/             单元：napcat / bridge / web / dsh，各自 unit.conf + 入口
 contracts/         抽象接口契约（与 units/ 一一对应）
-docs/              操作手册 / 配置 / 规范 / ADR
+AGENTS.md          项目规范（人和 AI 的入口）
+RUNBOOK.md         运维手册：起停、排障、复查
+docs/              配置 / 安装 / 设计 / ADR / 历史
 originals/         原文件快照（只读）
 etc/               配置模板
 ```
@@ -65,10 +67,10 @@ MODDIR=$PWD sh bin/check-contracts.sh
 
 | 文档 | 内容 |
 | --- | --- |
-| `docs/操作手册.md` | 当前真实操作流程、排障对照表 |
+| `RUNBOOK.md` | 当前真实操作流程、排障对照表 |
 | `docs/配置说明.md` | 配置文件、环境变量、端口、敏感文件 |
 | `docs/napcat-安装.md` | QQ + NapCat 宿主直装、注入原理、常见坑 |
-| `docs/编码规范.md` | 三条铁律、命名、提交信息格式 |
+| `AGENTS.md` | 三条铁律、命名、提交信息格式 |
 | `docs/独立性.md` | 单元之间为什么不能互相 import |
 | `docs/生命周期.md` | 启动/退避重启/停止的语义 |
 | `docs/安全模型.md` | token、权限、脱敏、边界 |
