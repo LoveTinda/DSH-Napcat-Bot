@@ -26,4 +26,10 @@ export WEB_PORT="$(conf_get WEB_PORT 8443)"
 export WEB_REDIRECT_PORT="$(conf_get WEB_REDIRECT_PORT 8088)"
 [ -f "$CERT" ] && { export WEB_TLS_CERT="$CERT"; export WEB_TLS_KEY="$KEY"; }
 
+# NapCat 的 WebUI 有自己的一套 token，网关自动带给它，用户不用再手输一次。
+NAPCAT_WEBUI_JSON="$(conf_get NAPCAT_WEBUI_JSON /opt/napcat/config/webui.json)"
+if [ -f "$NAPCAT_WEBUI_JSON" ]; then
+  export NAPCAT_WEBUI_TOKEN="$(grep -oE '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$NAPCAT_WEBUI_JSON" | head -1 | sed -E 's/.*"([^"]*)"$/\1/')"
+fi
+
 exec "$NODE" "$MODDIR/units/web/gateway.mjs"

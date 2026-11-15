@@ -14,6 +14,8 @@ import { URL } from 'node:url';
 const BIND = process.env.WEB_BIND || '127.0.0.1';
 const PORT = Number(process.env.WEB_PORT || 8088);
 const TOKEN = process.env.WEB_TOKEN || '';
+// NapCat WebUI 自己的 token（与网关 token 无关）。没有就留空，面板会要求手输。
+const NAPCAT_TOKEN = process.env.NAPCAT_WEBUI_TOKEN || '';
 const UPSTREAMS = {
   '/dsh/': { host: '127.0.0.1', port: Number(process.env.DSH_PORT || 3080) },
   '/bridge/': { host: '127.0.0.1', port: Number(process.env.BRIDGE_PANEL_PORT || 6702) },
@@ -96,7 +98,13 @@ function handler(req, res) {
 
   const up = UPSTREAMS[prefix];
   const subPath = url.pathname.slice(prefix.length - 1) || '/';
-  const target = { host: up.host, port: up.port, path: subPath + url.search, method: req.method, headers: { ...req.headers, host: `${up.host}:${up.port}` } };
+  // NapCat 的 WebUI 自带一套 token，和网关的 token 是两回事。
+  // 这里自动补上，免得用户打开面板还要手输一次。
+  let search = url.search;
+  if (prefix === '/napcat/' && NAPCAT_TOKEN && !url.searchParams.has('token')) {
+    search += (search ? '&' : '?') + 'token=' + encodeURIComponent(NAPCAT_TOKEN);
+  }
+  const target = { host: up.host, port: up.port, path: subPath + search, method: req.method, headers: { ...req.headers, host: `${up.host}:${up.port}` } };
 
   const proxy = http.request(target, (upRes) => {
     // 下游可能用绝对路径重定向（例如 NapCat 的 / → /webui），要补回本网关的前缀，
