@@ -54,6 +54,8 @@ sh bin/unit.sh status web        # 单元状态：start|stop|restart|status|logs
 sh bin/unit.sh logs bridge 40
 sh bin/napcat-wire-onebot.sh     # 把 OneBot 接到桥接器（改完要重启 napcat）
 sh bin/backup-to-sdcard.sh       # 完整备份到 /sdcard/backup/
+sh bin/check-module.sh           # Magisk 模块结构门禁（id/shebang/CRLF/service）
+sh bin/make-module.sh            # 出可刷 zip → /sdcard/Download/DSH-Go/
 ```
 
 改完代码的门禁：
@@ -90,6 +92,7 @@ node units/bridge/test-alert.mjs
 | [docs/生命周期.md](docs/生命周期.md) | 启动/退避重启/停止的语义 |
 | [docs/安全模型.md](docs/安全模型.md) | token、权限、脱敏、边界 |
 | [docs/生产就绪清单.md](docs/生产就绪清单.md) | 上线前还差什么 |
+| [docs/安装-Magisk.md](docs/安装-Magisk.md) | 刷成 Magisk 模块：前提、出包、验证、运行时缺口 |
 | [docs/接口与适配.md](docs/接口与适配.md) | 契约与实现的当前真实状态 |
 | [docs/adr/](docs/adr/) | 关键决策记录 |
 | [docs/历史-变更记录.md](docs/历史-变更记录.md) | 旧实现的记录（不再是当前实现） |

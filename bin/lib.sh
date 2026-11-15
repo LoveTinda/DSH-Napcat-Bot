@@ -12,12 +12,19 @@ if [ -z "$MODDIR" ]; then
   MODDIR=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)
 fi
 # 数据目录：Magisk 形态用 /data/adb/tinda-bot；没有这个路径就退到模块内 .runtime。
+# 判据不是「/data/adb/tinda-bot 在不在」——首次安装时它还不存在，那时会误落到模块目录里，
+# 而模块目录在升级/重装时会被整体替换，状态、日志、密钥全跟着没。所以先认模块自身路径。
 if [ -z "$DATA" ]; then
-  if [ -d /data/adb/tinda-bot ] || [ ! -w "$(dirname "$MODDIR")" ]; then
-    DATA=/data/adb/tinda-bot
-  else
-    DATA=$MODDIR/.runtime
-  fi
+  case "$MODDIR" in
+    /data/adb/modules/*|/data/adb/modules_update/*) DATA=/data/adb/tinda-bot ;;
+    *)
+      if [ -d /data/adb/tinda-bot ] || [ ! -w "$(dirname "$MODDIR")" ]; then
+        DATA=/data/adb/tinda-bot
+      else
+        DATA=$MODDIR/.runtime
+      fi
+      ;;
+  esac
 fi
 if [ -z "$CONF" ]; then CONF=$DATA/etc/tinda.conf; fi
 

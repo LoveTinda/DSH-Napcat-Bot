@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.2.20
+- **Magisk 形态补齐**：修掉 `bin/lib.sh` 的数据目录判定 bug —— 以前首次安装时
+  `/data/adb/tinda-bot` 还不存在，状态会落进模块目录，升级即丢；现在按模块自身路径
+  （`/data/adb/modules/*`）直接认 `/data/adb/tinda-bot`
+- **可刷性检查**：新增 `bin/check-module.sh`（module.prop 字段/id/versionCode、shebang、
+  可执行位、CRLF、`service.sh` 是否真拉单元、有无自带 node），带 `--selftest` 反向用例；
+  `customize.sh`/`uninstall.sh` 补 shebang，脚本统一 0755
+- **出包**：新增 `bin/make-module.sh`，只打运行需要的 69 个文件（不含 `.runtime/.git/originals/local`），
+  产出 `/sdcard/Download/DSH-Go/tinda-bot-v0.2.20-magisk.zip` + `.sha256`，并 `unzip -t` 校验
+- **文档**：新增 [docs/安装-Magisk.md](docs/安装-Magisk.md)（前提、刷入、验证、卸载、回滚）与
+  [ADR-0005](docs/adr/0005-magisk形态与chroot.md)（为什么模块只管生命周期、Linux 栈放 chroot）；
+  清单 S-1/S-4 仍如实标 ⚠️：真机 root 与运行时来源都没验
+- 说明：本机是 App 内 proot（无 `/data/adb`、无 `getprop`），只能「按模块格式准备好」，
+  刷入与开机自启必须在真机 root 环境完成
+
 ## v0.2.19
 - **T-4 资源上限**：桥接器/网关按配置设 V8 堆上限（`BRIDGE_HEAP_MB=256` / `WEB_HEAP_MB=192`，
   夹在 64–2048），node 单元 fd 软上限 `UNIT_MAX_OPEN_FILES=4096`；`doctor.sh` 新增
