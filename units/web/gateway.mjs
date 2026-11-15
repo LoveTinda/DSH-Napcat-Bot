@@ -64,6 +64,14 @@ const useTls = !!(TLS_CERT && TLS_KEY && fs.existsSync(TLS_CERT) && fs.existsSyn
 function handler(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+  // 用 ?k=<token> 进来时立刻种一个 cookie：
+  // 导航页里的 iframe 是独立请求，不带查询串，没有这条会全部 401，
+  // 表现就是「控制台里点哪个标签都打不开」。
+  if (TOKEN && url.searchParams.get('k') === TOKEN) {
+    const secure = useTls ? '; Secure' : '';
+    res.setHeader('set-cookie', `tinda=${TOKEN}; Path=/; HttpOnly; SameSite=Lax${secure}`);
+  }
+
   // 1) 健康检查：不鉴权，只回 ok
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' });
