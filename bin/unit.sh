@@ -18,6 +18,10 @@ load() {
   . "$UNITS/$u/unit.conf"
   RESTART_MAX=${RESTART_MAX:-10}
   BACKOFF_MAX=${BACKOFF_MAX:-60}
+  case "$TYPE" in
+    exec|chroot|external|auto) ;;
+    *) log error "$u: TYPE=$TYPE 不认识（exec|chroot|external|auto）"; exit 78 ;;
+  esac
   mkdir -p "$STATE_DIR"
 }
 
@@ -70,20 +74,50 @@ find_unit_pids() {
   done
 }
 
-spawn() {
+# 目的：算出这个单元实际该怎么起——exec（宿主直装）还是 chroot（Magisk 下的 Linux rootfs）。
+# 输入：无（读 $TYPE 与 /data/adb 是否存在）；输出：echo "exec" 或 "chroot:<rootfs>"。
+# 失败：chroot 但 rootfs 不存在 → 输出 chroot:<路径>，由 spawn 报 78。
+# 副作用：无。
+resolve_mode() {
+  _rf=${TINDA_ROOTFS:-/data/adb/tinda-bot/rootfs}
   case "$TYPE" in
-    chroot)
-      _rf=$(conf_get "$ROOTFS_KEY" "")
-      [ -d "$_rf/usr" ] || { log error "$NAME: 容器未初始化"; return 78; }
-      mkdir -p "$_rf/proc" "$_rf/dev" "$_rf/sys" "$_rf/sdcard"
-      mountpoint -q "$_rf/proc" || mount -t proc proc "$_rf/proc" 2>/dev/null
-      mount -o bind /dev "$_rf/dev" 2>/dev/null
-      mount -o bind /sys "$_rf/sys" 2>/dev/null
-      mount -o bind /sdcard "$_rf/sdcard" 2>/dev/null
-      chroot "$_rf" /bin/bash -lc "exec $ENTRY" ;;
-    exec) sh -c "$CMD" ;;
+    exec|external) echo "$TYPE" ;;
+    chroot) echo "chroot:$_rf" ;;
+    auto)
+      # 判据是「Android root 环境 + 有 rootfs」：proot 里 /data/adb 不存在，自然退回 exec。
+      if [ -d /data/adb ] && [ -d "$_rf/usr" ]; then echo "chroot:$_rf"; else echo "exec"; fi ;;
+  esac
+}
+
+spawn_exec() { sh -c "$CMD"; }
+
+# 目的：在 Magisk 的 root 环境里把模块代码与状态挂进 Linux rootfs，再 chroot 执行单元命令。
+# 输入：$1 = rootfs 路径；用 $CMD 作为 rootfs 内的命令。
+# 失败：rootfs 缺 /usr 或缺代码目录 → 78；mount 失败只 warn（可能已挂过/内核不支持，让后续命令自己报错）。
+# 副作用：在 rootfs 里建挂载点并 bind mount proc/dev/sys/sdcard/data；退出时由内核随进程结束保留。
+spawn_chroot() {
+  _rf=$1
+  [ -d "$_rf/usr" ] || { log error "$NAME: rootfs 未初始化：$_rf（跑 bin/magisk-provision.sh）"; return 78; }
+  mkdir -p "$_rf/proc" "$_rf/dev" "$_rf/sys" "$_rf/sdcard" "$_rf/data/adb" 2>/dev/null
+  mountpoint -q "$_rf/proc" || mount -t proc proc "$_rf/proc" 2>/dev/null || log warn "$NAME: 挂 proc 失败"
+  mount -o bind /dev "$_rf/dev" 2>/dev/null || log warn "$NAME: 挂 /dev 失败"
+  mount -o bind /sys "$_rf/sys" 2>/dev/null || log warn "$NAME: 挂 /sys 失败"
+  [ -d /sdcard ] && { mount -o bind /sdcard "$_rf/sdcard" 2>/dev/null || log warn "$NAME: 挂 /sdcard 失败"; }
+  mount -o bind /data/adb "$_rf/data/adb" 2>/dev/null || log warn "$NAME: 挂 /data/adb 失败"
+  # 模块代码与状态都在 /data/adb 下，已经随上面的 bind 进 rootfs；这里只确认路径真的可达。
+  [ -d "$_rf/data/adb" ] || { log error "$NAME: rootfs 里看不到 /data/adb"; return 78; }
+  [ -f "$_rf$MODDIR/bin/unit.sh" ] || { log error "$NAME: 代码没进 rootfs：$MODDIR"; return 78; }
+  # 脚本首行是 #!/system/bin/sh（Android 路径），rootfs 里没有它；显式用 /bin/sh 跑。
+  chroot "$_rf" /bin/sh -lc "cd '$MODDIR' && exec /bin/sh '$CMD'"
+}
+
+spawn() {
+  _mode=$(resolve_mode)
+  case "$_mode" in
+    exec) log info "$NAME: 启动方式 exec（宿主直装）"; spawn_exec ;;
+    chroot:*) log info "$NAME: 启动方式 chroot（rootfs=$_mode）"; spawn_chroot "${_mode#chroot:}" ;;
     external) log info "$NAME: 外部单元，由 DSH 自己托管"; return 0 ;;
-    *) log error "$NAME: 未知 TYPE=$TYPE"; return 78 ;;
+    *) log error "$NAME: 未知启动方式 $_mode"; return 78 ;;
   esac
 }
 
@@ -155,7 +189,7 @@ do_stop() {
 }
 
 act="$1"; name="$2"
-[ -n "$act" ] && [ -n "$name" ] || { echo "用法: $0 start|stop|restart|status|logs <unit> [n]"; exit 2; }
+[ -n "$act" ] && [ -n "$name" ] || { echo "用法: $0 start|stop|restart|status|explain|logs <unit> [n]"; exit 2; }
 load "$name"
 case "$act" in
   start) do_start ;;
@@ -173,6 +207,12 @@ case "$act" in
       echo "$name: stopped (external, $PROBE_URL 连不上)"; exit 0
     fi
     echo "$name: stopped" ;;
+  explain)
+    # 只解释「会怎么起」，不启动任何东西；用来在刷机前确认 auto 到底选了哪条路。
+    echo "$name: TYPE=$TYPE → $(resolve_mode)"
+    echo "  CMD=$CMD"
+    echo "  DATA=$DATA"
+    exit 0 ;;
   logs) tail -n "${3:-40}" "$LOG_FILE" 2>/dev/null || echo "无日志" ;;
   *) echo "未知动作：$act"; exit 2 ;;
 esac

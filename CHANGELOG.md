@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v0.2.21
+- **chroot 落地**：单元改 `TYPE=auto` —— Android root 且有 `/data/adb/tinda-bot/rootfs/usr`
+  才走 chroot，否则宿主直装；chroot 前把 `/data/adb`、`/sdcard`、`/proc`、`/dev`、`/sys`
+  挂进去，代码/配置/日志/状态仍是 Android 侧那一份
+- **rootfs 供给**：新增 `bin/magisk-provision.sh`（`--check` / `--from` / `--tarball`）：
+  不带 `.sha256` 的 tar 包默认拒绝，非空 rootfs 默认拒绝覆盖；解包后打印装 node/dsh 的命令
+- **可观测**：新增 `unit.sh explain <单元>`（打印 exec 还是 chroot），`service.sh` 重写为
+  自带初始化 + 写 `$DATA/logs/module.log`（含形态、rootfs、node、每个单元的启动结果），
+  不再依赖 `customize.sh`（KernelSU/SukiSU 不保证执行它）
+- **模块门禁**：`check-module.sh` 增加 `unit.conf` 的 `TYPE` 校验与 `module.log` 检查
+- **文档**：安装文档补 KernelSU/SukiSU 的 `ksud module install` 与 rootfs 三节；ADR-0005 补「落地」
+
 ## v0.2.20
 - **Magisk 形态补齐**：修掉 `bin/lib.sh` 的数据目录判定 bug —— 以前首次安装时
   `/data/adb/tinda-bot` 还不存在，状态会落进模块目录，升级即丢；现在按模块自身路径

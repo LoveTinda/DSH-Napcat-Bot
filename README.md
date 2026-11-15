@@ -56,6 +56,7 @@ sh bin/napcat-wire-onebot.sh     # 把 OneBot 接到桥接器（改完要重启 
 sh bin/backup-to-sdcard.sh       # 完整备份到 /sdcard/backup/
 sh bin/check-module.sh           # Magisk 模块结构门禁（id/shebang/CRLF/service）
 sh bin/make-module.sh            # 出可刷 zip → /sdcard/Download/DSH-Go/
+sh bin/unit.sh explain bridge     # 这个单元会走 exec 还是 chroot（刷机前先看）
 ```
 
 改完代码的门禁：

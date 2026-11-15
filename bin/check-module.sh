@@ -44,6 +44,16 @@ check_root() {
     grep -q "$CR" "$f" && fail "$(basename "$f") 含 CRLF"
   done
 
+  # 单元声明：TYPE 只允许这四种；写错会让 unit.sh 在开机时退出 78，而且日志在模块目录里看不到
+  for c in $(find "$root/units" -name 'unit.conf' 2>/dev/null); do
+    _t=$(sed -n 's/^TYPE=//p' "$c" | head -1)
+    case "$_t" in
+      exec|chroot|external|auto) ;;
+      *) fail "$(basename "$(dirname "$c")")/unit.conf 的 TYPE='$_t' 非法（exec|chroot|external|auto）" ;;
+    esac
+  done
+  grep -q 'module.log' "$root/service.sh" || note "service.sh 没写 module.log，刷完出问题不好查"
+
   # service.sh 必须真的去拉单元，否则「开机自启」只是口号
   grep -q 'unit.sh' "$root/service.sh" || fail "service.sh 没有调用 bin/unit.sh"
   for u in napcat bridge web; do

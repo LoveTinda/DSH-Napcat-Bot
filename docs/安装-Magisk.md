@@ -10,7 +10,7 @@
 | 前提 | 怎么确认 | 没有会怎样 |
 | --- | --- | --- |
 | 手机已 root 且装了 Magisk | Magisk App 里能看到「模块」页 | 刷不了；proot 里的 `su` 是假的 |
-| 有可用的 node 运行时 | `su -c 'command -v node'` 或自带 `/data/adb/modules/tinda-bot/bin/node` | 各单元 `exit 78`，`doctor.sh` 报「缺 node 运行时」（S-4） |
+| 有可用的 node 运行时 | `magisk-provision.sh --check`，或 `su -c 'command -v node'` | 各单元 `exit 78`，`doctor.sh` 报「缺 node 运行时」（S-4） |
 | 业务运行时（DSH / NapCat / QQ） | 见第 5 节 | 模块装上但服务起不来 |
 
 **当前这台机器不满足第 1 条**：这里是 App 内的 proot Ubuntu（`/data/adb` 不存在、
@@ -21,26 +21,32 @@
 ```sh
 cd /root/workspace/tinda-bot
 sh bin/check-module.sh      # 结构门禁：module.prop / shebang / CRLF / service.sh
-sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.20-magisk.zip
+sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.21-magisk.zip
 ```
 
 包内只含运行需要的东西（`module.prop`、四个脚本、`bin/ units/ contracts/ etc/ docs/` 与根文档），
 不含 `.runtime/`、`.git`、`originals/`、`local/`。当前产物：
 
-- `tinda-bot-v0.2.20-magisk.zip`（71 个文件，约 172 KB）
-- sha256：`55dd86713a7986d3dd3cbf7c846f2f49c8b7715d0a044c3f0c0dab4a67cdc1be`（出包时会打印，以实际为准）
+- `tinda-bot-v0.2.21-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
+- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.21-magisk.zip.sha256`（在 zip 所在目录）
 - 同目录有 `.sha256`，刷之前核一下
 
 ## 2. 刷入
 
-任选一种，**刷完必须重启**（Magisk 在开机阶段挂模块）：
+**刷完必须重启**（模块是在开机阶段挂载的）。按你的 root 方案选：
 
 ```sh
-# 命令行（手机上有 root shell 时）
-su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.20-magisk.zip'
+# Magisk
+su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.21-magisk.zip'
+
+# KernelSU / SukiSU（同一个模块格式，目录也是 /data/adb/modules）
+su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.21-magisk.zip'
 ```
 
-或 Magisk App → **模块** → **从本地安装** → 选 zip → 重启。
+也可以直接在 Magisk / KernelSU / SukiSU 的 App 里：**模块** → **从本地安装** → 选 zip → 重启。
+
+KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子），所以 `service.sh`
+开机时会自己再初始化一次目录与配置，**不依赖 customize.sh**；两套都能用同一份包。
 
 ## 3. 装完长什么样
 
@@ -70,18 +76,63 @@ su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'
 
 ## 5. 运行时从哪来（刷之前必须决定）
 
-模块只有 shell 和 JS，**不带 node**；NapCat/QQ 还是 glibc 的 Linux 程序。两条路（详见
-[ADR-0005](adr/0005-magisk形态与chroot.md)）：
+模块只有 shell 和 JS，**不带 node**；NapCat/QQ 还是 glibc 的 Linux 程序。所以单元支持
+`TYPE=auto`：**有 `/data/adb` 且 `/data/adb/tinda-bot/rootfs/usr` 存在就走 chroot，
+否则走宿主直装**（proot 里就是这样）。代码已按这个约定写好，rootfs 由现场提供。
 
-1. **chroot + Ubuntu rootfs（推荐）**：把现在 proot 里这套原样放进 rootfs，单元改成
-   `TYPE=chroot`（`unit.sh` 已支持挂 proc/dev/sys/sdcard 后 `chroot`）。整套一致，
-   代价是要自己维护 rootfs 的体积与更新。
-2. **Android 原生 node**：放一个能跑的 `node` 到 `/data/adb/modules/tinda-bot/bin/node`
-   （会被优先使用），DSH 直接 npm 装到 Android 侧；但 NapCat/QQ 仍需另一个 Linux 环境，
-   等于维护两套。
+### 5.1 准备 rootfs
 
-两条路都还没在真机上验过，属于清单 S-4（运行时来源可验证）；当前 `doctor.sh` 会把缺
-node 的事实直接报出来，不会假装成功。
+```sh
+# 看现状：rootfs 在不在、里面的 node/npm/dsh 有没有、每个单元会怎么起
+su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --check'
+```
+
+两种来源，二选一：
+
+```sh
+# A. 解包官方 Ubuntu base（arm64）。必须带 .sha256，否则拒绝（S-4）
+su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh \
+  --tarball /sdcard/Download/ubuntu-base-24.04-base-arm64.tar.gz'
+
+# B. 克隆一份现成的 Ubuntu 目录树（硬链接优先，省空间）
+su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --from /path/to/ubuntu'
+```
+
+脚本会拒绝覆盖非空的 rootfs（要覆盖加 `--force`），也不联网、不装包。
+
+### 5.2 在 rootfs 里装运行时
+
+```sh
+su -c "chroot /data/adb/tinda-bot/rootfs /bin/bash -lc 'apt-get update && apt-get install -y nodejs npm ca-certificates'"
+su -c "chroot /data/adb/tinda-bot/rootfs /bin/bash -lc 'npm i -g @deepseek-ai/dsh'"
+```
+
+然后把 `/data/adb/tinda-bot/etc/tinda.conf` 的 `DSH_BIN` 指到 rootfs 内的 DSH 入口
+（`chroot ... which dsh` 查），重启单元。
+
+### 5.3 确认真的走了 chroot
+
+```sh
+su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh explain bridge'
+# 期望：bridge: TYPE=auto → chroot:/data/adb/tinda-bot/rootfs
+su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --check'
+su -c 'tail -20 /data/adb/tinda-bot/logs/module.log'   # 每行会写「启动方式 chroot」
+```
+
+chroot 启动时 `unit.sh` 会把 `/data/adb`、`/sdcard`、`/proc`、`/dev`、`/sys` 挂进 rootfs，
+所以代码、配置、日志、状态仍然是 Android 侧那一份，不会出现「两套配置」。
+
+rootfs 里要装的东西（缺了单元会自己报错，不会静默）：
+
+- Ubuntu 版 `node`（`apt install nodejs` 即可，桥接器/网关/DSH 都用它）
+- `openssl`（网关签证书；缺了退回 HTTP 并告警）
+- NapCat 与 QQ：现有 proot 里的 `/opt/napcat`、`/opt/QQ` 要迁进 rootfs，`xvfb-run` 也要装
+- **不要**把 Android 的 node 放进 `/data/adb/modules/tinda-bot/bin/node` 后指望 chroot 用它：
+  那是 bionic 二进制，在 Ubuntu rootfs 里跑不了。放 `bin/node` 只对宿主直装形态有意义。
+
+这套路径**没有在真机上跑过**（本机没有 `/data/adb`），属于清单 S-4 的残余；但失败是显式的：
+缺 rootfs → `unit.sh explain` 显示 exec、`module.log` 写明；缺 node → 单元 `exit 78`，
+`doctor.sh` 报「缺 node 运行时」，不会假装成功。
 
 ## 6. 卸载与回滚
 

@@ -271,6 +271,7 @@ git clone /sdcard/backup/tinda-bot-<版本>-<时间>/repo.bundle ~/tinda-restore
 | 回复晚了 / 事后才到 | 面板概览的「待补发」 | 3001 抖过：桥接器已把回复放进 `state/bridge/outbox.json`，恢复后按 `BRIDGE_SEND_DRAIN_MS` 补发；看事件里的「补发成功」 |
 | 一个问题收到两条回答 | 面板事件的「重复推送」 | NapCat 超时重推；同 `message_id` 已被去重。仍重复说明事件里没有 `message_id`，查 NapCat 的 `messagePostFormat` |
 | 手机没收到告警 | `grep ^ALERT_QQ .runtime/etc/tinda.conf` | 空 = 关；或同类告警还在 `ALERT_COOLDOWN_SEC` 冷却窗口里（面板「告警接收」会显示被压次数） |
+| 刷了模块但服务没起 | `su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'` | 日志里有「形态 / rootfs / node / 每个单元结果」；缺 node 或 rootfs 会明说。再跑 `unit.sh explain <单元>` 看走 exec 还是 chroot |
 | 待补发一直不降 | `unit.sh logs bridge 40` 里 `fail:send` | 3001 一直连不上；先修 NapCat，再等轮询。过期（`BRIDGE_OUTBOX_TTL_MS`）会自动丢弃并记事件 |
 | 起了两个同样的进程 | `doctor.sh` 端口项 | 旧实例没停干净；`unit.sh stop` 只认自己 pid，手起的要先手动 kill |
 

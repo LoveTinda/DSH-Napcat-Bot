@@ -37,6 +37,18 @@
 - 单元当前是 `TYPE=exec`（宿主直装）；切 chroot 要改 `unit.conf` 的 `TYPE/ROOTFS_KEY/ENTRY`，
   并在 rootfs 里放一份代码或 bind-mount 模块目录——这部分没在真机上走过，未验证。
 
+## 落地（v0.2.21）
+
+- 单元 `TYPE=auto`：`/data/adb` 存在 **且** `/data/adb/tinda-bot/rootfs/usr` 存在才走 chroot，
+  否则宿主直装。同一份 unit.conf 在 proot 与 root 环境都能跑，不需要两套配置。
+- chroot 前把 `/data/adb`、`/sdcard`、`/proc`、`/dev`、`/sys` 挂进去；代码、配置、日志、状态
+  仍是 Android 侧那一份（不会出现「rootfs 里另有一份 tinda.conf」）。
+- rootfs 路径用约定（`$DATA/rootfs`），不加配置键；要换位置用 `TINDA_ROOTFS` 环境变量。
+- `bin/magisk-provision.sh` 负责解包/克隆与体检：不带校验和的 tar 包默认拒绝（S-4），
+  非空 rootfs 默认拒绝覆盖。
+- `unit.sh explain <单元>` 打印实际会走哪条路，`module.log` 每行写「启动方式」——刷完先看这两处。
+- KernelSU/SukiSU 不保证执行 `customize.sh`，所以 `service.sh` 自己再初始化一次目录与配置。
+
 ## 何时该重审
 
 - 真机拿到 root、装好 Magisk 后第一次实测；
