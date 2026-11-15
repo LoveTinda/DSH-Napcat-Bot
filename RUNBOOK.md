@@ -219,8 +219,8 @@ git push origin main                      # 22 端口被墙，~/.ssh/config 已�
 
 ```console
 $ sh bin/backup-to-sdcard.sh
-OK /sdcard/backup/tinda-bot-v0.2.18-20261115-150455
-   388 个文件，4.4M
+OK /sdcard/backup/tinda-bot-v0.2.18-20261115-150909
+   515 个文件，5.5M
 ```
 
 ## 8.5 备份组成与恢复
