@@ -21,14 +21,14 @@
 ```sh
 cd /root/workspace/tinda-bot
 sh bin/check-module.sh      # 结构门禁：module.prop / shebang / CRLF / service.sh
-sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.21-magisk.zip
+sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.22-magisk.zip
 ```
 
 包内只含运行需要的东西（`module.prop`、四个脚本、`bin/ units/ contracts/ etc/ docs/` 与根文档），
 不含 `.runtime/`、`.git`、`originals/`、`local/`。当前产物：
 
-- `tinda-bot-v0.2.21-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
-- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.21-magisk.zip.sha256`（在 zip 所在目录）
+- `tinda-bot-v0.2.22-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
+- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.22-magisk.zip.sha256`（在 zip 所在目录）
 - 同目录有 `.sha256`，刷之前核一下
 
 ## 2. 刷入
@@ -37,10 +37,10 @@ sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.21-magi
 
 ```sh
 # Magisk
-su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.21-magisk.zip'
+su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.22-magisk.zip'
 
 # KernelSU / SukiSU（同一个模块格式，目录也是 /data/adb/modules）
-su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.21-magisk.zip'
+su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.22-magisk.zip'
 ```
 
 也可以直接在 Magisk / KernelSU / SukiSU 的 App 里：**模块** → **从本地安装** → 选 zip → 重启。
@@ -87,20 +87,36 @@ su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'
 su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --check'
 ```
 
-两种来源，二选一：
+两种来源，二选一（**推荐 A**：手机里已经有装好 node/DSH/QQ 的 Ubuntu，复制一份比重新装快得多）：
 
 ```sh
-# A. 解包官方 Ubuntu base（arm64）。必须带 .sha256，否则拒绝（S-4）
+# A. 复制这台手机上 App 的本机环境（独立快照，新 inode，不共享文件）
+su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh \
+  --from /data/user/0/io.github.ccch1mneyyy.dsh_app/files/runtime/rootfs'
+
+# A2. 同样的东西，硬链接克隆（几秒完成，但和 App 共享 inode，一侧原地写会影响另一侧）
+su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --link \
+  --from /data/user/0/io.github.ccch1mneyyy.dsh_app/files/runtime/rootfs'
+
+# B. 从官方 Ubuntu base 起一个干净环境。必须带 .sha256，否则拒绝（S-4）
 su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh \
   --tarball /sdcard/Download/ubuntu-base-24.04-base-arm64.tar.gz'
-
-# B. 克隆一份现成的 Ubuntu 目录树（硬链接优先，省空间）
-su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --from /path/to/ubuntu'
 ```
 
-脚本会拒绝覆盖非空的 rootfs（要覆盖加 `--force`），也不联网、不装包。
+App 环境路径可能随版本变化，拿不准就先查：
 
-### 5.2 在 rootfs 里装运行时
+```sh
+su -c 'ls -d /data/user/0/*/files/runtime/rootfs'
+```
+
+A 方案的代价：这台机器的环境约 7.7G（QQ 646M + NapCat 311M + DSH 243M + 系统其余），
+复制要几分钟、占双份空间（当前还剩 120G+，够）；好处是复制完就**自带 node、DSH、QQ 登录态**，
+不用再 apt/npm。复制是快照，App 以后更新环境不会影响模块这份，要同步得重新复制一次。
+
+脚本会拒绝覆盖非空的 rootfs（要覆盖加 `--force`），默认不联网；`--from` 会排除
+`proc/dev/sys/sdcard/data`，避免把内核文件系统翻一遍。
+
+### 5.2 在 rootfs 里装运行时（A/A2 方案已自带，可跳过）
 
 ```sh
 su -c "chroot /data/adb/tinda-bot/rootfs /bin/bash -lc 'apt-get update && apt-get install -y nodejs npm ca-certificates'"

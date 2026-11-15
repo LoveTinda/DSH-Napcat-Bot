@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v0.2.22
+- **rootfs 复制模式**：`magisk-provision.sh --from` 默认用 tar 管道**复制**（新 inode，
+  排除 `proc/dev/sys/sdcard/data`，保留符号链接与权限），`--link` 才用硬链接克隆。
+  这样可以直接把这台手机 App 里装好的 Ubuntu（含 node/DSH/QQ 登录态）复制成模块的 rootfs，
+  不用重新 apt/npm，也不怕两边互相改文件
+- **日志更准**：`service.sh` 有 rootfs 时检查 rootfs 里的 node（而不是 Android PATH 的），
+  开机日志能直接看出「rootfs 里没 node」；`unit.sh` 缺 `chroot` 命令时明确报错
+- **文档**：安装文档给出直接复用手机现有环境的命令（7.7G、几分钟）、路径变化时怎么查、
+  以及「proot 与模块两套不要同时占 8443」
+
 ## v0.2.21
 - **chroot 落地**：单元改 `TYPE=auto` —— Android root 且有 `/data/adb/tinda-bot/rootfs/usr`
   才走 chroot，否则宿主直装；chroot 前把 `/data/adb`、`/sdcard`、`/proc`、`/dev`、`/sys`

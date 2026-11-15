@@ -12,6 +12,7 @@ MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)}
 DATA_ROOT=${DATA_ROOT:-/data/adb/tinda-bot}
 ROOTFS="$DATA_ROOT/rootfs"
 FORCE=0
+LINK=0
 MODE=""
 SRC=""
 
@@ -22,7 +23,8 @@ usage() {
       sh $0 --tarball <ubuntu-base-*.tar.gz> [--force]
 
   --check          只报告现状（rootfs / node / dsh / 挂载点），不写文件
-  --from DIR       用 bin/rootfs-clone.sh 克隆一份现成目录树（硬链接优先）
+  --from DIR       复制一份现成目录树（新 inode；默认排除 proc/dev/sys/sdcard/data）
+  --link           配合 --from：改用 bin/rootfs-clone.sh 硬链接克隆（快，但和源共享 inode）
   --tarball FILE   解包 Ubuntu base（要求同目录有 <FILE>.sha256，--force 可跳过）
   --force          目标 rootfs 非空时仍然继续（默认拒绝）
 
@@ -36,6 +38,7 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --check) MODE=check ;;
     --from) MODE=clone; SRC=${2:-}; shift ;;
+    --link) LINK=1 ;;
     --tarball) MODE=tarball; SRC=${2:-}; shift ;;
     --force) FORCE=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -96,7 +99,18 @@ case "$MODE" in
   clone)
     [ -d "$SRC/usr" ] || die "--from 需要指向一个解包好的 Ubuntu 目录（缺 $SRC/usr）"
     [ "$FORCE" -eq 1 ] && rm -rf "$ROOTFS"
-    sh "$MODDIR/bin/rootfs-clone.sh" "$SRC" "$ROOTFS" || die "克隆失败"
+    if [ "$LINK" -eq 1 ]; then
+      echo "硬链接克隆（与源共享 inode，任何一侧原地写都会影响另一侧）"
+      sh "$MODDIR/bin/rootfs-clone.sh" "$SRC" "$ROOTFS" || die "克隆失败"
+    else
+      # 默认用 tar 管道复制：新 inode，符号链接/权限保留，不会和源打架。
+      # 必须排除 proc/dev/sys/sdcard：源里这些可能是挂载点，跟着复制会把内核文件系统翻一遍。
+      mkdir -p "$ROOTFS"
+      echo "复制 $SRC → $ROOTFS（几 GB 要几分钟；排除 proc/dev/sys/sdcard/data）"
+      ( cd "$SRC" && tar -cf - --exclude=./proc --exclude=./dev --exclude=./sys \
+          --exclude=./sdcard --exclude=./data . ) | ( cd "$ROOTFS" && tar -xf - ) \
+        || die "复制失败（磁盘满了？或 tar 不支持 --exclude）"
+    fi
     ;;
   tarball)
     [ -f "$SRC" ] || die "找不到 tar 包：$SRC"

@@ -43,7 +43,14 @@ if [ -d "$ROOTFS/usr" ]; then
 else
   log "rootfs：未初始化（单元走宿主直装；见 docs/安装-Magisk.md §5）"
 fi
-if command -v node >/dev/null 2>&1; then
+# 有 rootfs 就看 rootfs 里的 node（那才是单元真正会用到的），否则才看 Android 的 PATH。
+if [ -d "$ROOTFS/usr" ]; then
+  if chroot "$ROOTFS" /bin/sh -lc 'command -v node' >/dev/null 2>&1; then
+    log "node：$(chroot "$ROOTFS" /bin/sh -lc 'node -v' 2>/dev/null)（rootfs 内）"
+  else
+    log "warn: rootfs 里没有 node —— 单元会 exit 78（apt install nodejs）"
+  fi
+elif command -v node >/dev/null 2>&1; then
   log "node：$(node -v 2>/dev/null)（PATH）"
 elif [ -x "$MODDIR/bin/node" ]; then
   log "node：$MODDIR/bin/node"

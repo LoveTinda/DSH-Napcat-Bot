@@ -98,6 +98,7 @@ spawn_exec() { sh -c "$CMD"; }
 spawn_chroot() {
   _rf=$1
   [ -d "$_rf/usr" ] || { log error "$NAME: rootfs 未初始化：$_rf（跑 bin/magisk-provision.sh）"; return 78; }
+  command -v chroot >/dev/null 2>&1 || { log error "$NAME: 没有 chroot 命令（Android 太老或缺 busybox）"; return 78; }
   mkdir -p "$_rf/proc" "$_rf/dev" "$_rf/sys" "$_rf/sdcard" "$_rf/data/adb" 2>/dev/null
   mountpoint -q "$_rf/proc" || mount -t proc proc "$_rf/proc" 2>/dev/null || log warn "$NAME: 挂 proc 失败"
   mount -o bind /dev "$_rf/dev" 2>/dev/null || log warn "$NAME: 挂 /dev 失败"
