@@ -193,6 +193,9 @@ printf '只回四个字：测试成功' | node /opt/dsh/node_modules/@deepseek-a
 DSH 那格显示一页说明而不是空白：它的网页端有一把每次启动随机生成、只存在内存里的授权串，
 只认自己打印的链接，网关替它签不了。这不是坏了。
 
+面板的路由/状态字段/错误态见 [docs/Bridge面板.md](docs/Bridge面板.md)；网关的鉴权与反代规则见
+[docs/网关.md](docs/网关.md)。
+
 桥接器面板的 `/panel/state.json` 和 `/state.json` 是同一份只读快照；页面在 `/panel/` 下用
 相对路径 `state.json`，在 `/bridge/` 前缀下由网关转发到 `/state.json`，两种挂载都不会 404。
 面板不做写操作：改 `BRIDGE_BACKEND` 等配置请编辑 `$DATA/etc/tinda.conf`，再

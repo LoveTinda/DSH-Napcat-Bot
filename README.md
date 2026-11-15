@@ -76,6 +76,9 @@ node units/bridge/test-panel.mjs
 | 文档 | 内容 |
 | --- | --- |
 | [RUNBOOK.md](RUNBOOK.md) | 当前真实操作流程、排障对照表 |
+| [docs/复查报告-2026-11-15.md](docs/复查报告-2026-11-15.md) | v0.2.18 全量复查：问题、修复、验证、残余风险 |
+| [docs/Bridge面板.md](docs/Bridge面板.md) | 面板路由、状态 JSON、UI 行为、只读边界 |
+| [docs/网关.md](docs/网关.md) | 鉴权流程、cookie、反代规则、失败模式 |
 | [docs/配置说明.md](docs/配置说明.md) | 配置文件、环境变量、端口、敏感文件 |
 | [docs/napcat-安装.md](docs/napcat-安装.md) | QQ + NapCat 宿主直装、注入原理、常见坑 |
 | [AGENTS.md](AGENTS.md) | 三条铁律、命名、提交信息格式 |
