@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v0.2.29
+- 修复「NapCat 面板提示 token is invalid 却没地方救」：新增 `/reset` 页（8443 与各面板端口都有），
+  清掉该 origin 的 `localStorage`/`sessionStorage` 与网关 cookie 后回首页
+- 控制台右上角加「重置面板」按钮，直接打开 NapCat 独立端口的 `/reset`
+- RUNBOOK 补这条：`token is invalid` 是 NapCat 服务端对错误 hash 的原话（实测复现），
+  凭据只存在浏览器里、1 小时过期，清掉重进即可
+
 ## v0.2.28
 - **输出四档（⑤）**：新增 `units/bridge/output.mjs`——minimalist / concise / detailed / complete，
   按 `dsh headless --json` 的 `thinking` / `tool_call` / `tool_result` / `text` / `final` 事件渲染

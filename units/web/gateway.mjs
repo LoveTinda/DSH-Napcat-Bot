@@ -132,6 +132,20 @@ function authed(req, url) {
   return Boolean(c) && tokenEquals(c, TOKEN);
 }
 
+const RESET_HTML = `<!doctype html><meta charset="utf-8"><title>重置面板登录</title>
+<style>body{font:15px/1.7 system-ui;margin:0;padding:2rem 1.2rem;background:#0f1115;color:#e6e6e6}
+a{color:#7cc4ff}code{background:#1a2029;padding:.1rem .35rem;border-radius:4px}p{color:#a7b0bd}</style>
+<h3 style="margin:0 0 .6rem;color:#e6e6e6">正在清掉这个面板的本地登录态…</h3>
+<p>会清掉 <code>localStorage</code> / <code>sessionStorage</code> 和网关 cookie，然后回到首页。</p>
+<p id="st">正在清理…</p>
+<p><a href="/">如果没有自动跳转，点这里</a></p>
+<script>
+try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
+try { document.cookie = 'tinda=; Path=/; Max-Age=0'; } catch (e) {}
+document.getElementById('st').textContent = '已清空，正在跳转…';
+setTimeout(function () { location.replace('/'); }, 500);
+</script>`;
+
 /** 目的：返回浏览器可读的 401 页面，说明 token 从哪来。 */
 function unauthorized(res) {
   const body = '<!doctype html><meta charset="utf-8"><title>需要 token</title>' +
@@ -229,6 +243,12 @@ function originHandler(prefix) {
     if (TOKEN && url.searchParams.get('k') === TOKEN) setTokenCookie(res);
     if (url.pathname === '/healthz') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('ok'); }
     if (url.pathname === '/logout') { clearTokenCookie(res); res.writeHead(302, { location: '/' }); return res.end(); }
+    // 重置面板登录：NapCat 的凭据只存在浏览器里，换过 token 或凭据过期就只能清掉重来。
+    // 给一个能点的入口，别让用户去翻 devtools。它不返回任何数据，所以不鉴权。
+    if (url.pathname === '/reset' || url.pathname === '/__reset') {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return res.end(RESET_HTML);
+    }
     if (!authed(req, url)) return unauthorized(res);
     return forward(prefix, url.pathname, url.search, req, res, true);
   };
@@ -267,6 +287,11 @@ const handler = (req, res) => {
     clearTokenCookie(res);
     res.writeHead(302, { location: '/' });
     return res.end();
+  }
+  // 控制台登录重置：清 cookie + localStorage，回到首页重新输 token。
+  if (url.pathname === '/reset' || url.pathname === '/__reset') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(RESET_HTML);
   }
   // 带前缀的面板入口统一补斜杠，避免 iframe 里的相对路径解析到网关根。
   if (url.pathname === '/bridge' || url.pathname === '/dsh' || url.pathname === '/napcat') {
