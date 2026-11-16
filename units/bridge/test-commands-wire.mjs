@@ -64,6 +64,8 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     BRIDGE_SEEN_FILE: '',
     BRIDGE_POLICY_FILE: policyFile,
     BRIDGE_MAX_EVENT_AGE_SEC: '0',
+    // 本测试数的是「发了几条消息」，输入状态会多出请求，关掉更干净
+    BRIDGE_TYPING: '0',
     ALERT_QQ: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -134,11 +136,18 @@ try {
   const unk = await reply('不认识', mark);
   check('未知命令有回执', Boolean(unk), JSON.stringify(sent.slice(mark)));
 
-  // 未实现命令：诚实回执
+  // /output 已转正（v0.2.28）：无参打印档位表，不再回「还没实现」
   mark = sent.length;
   await say('/output');
+  const tiers = await reply('当前输出档位', mark);
+  check('/output 打印档位表', Boolean(tiers), JSON.stringify(sent.slice(mark)));
+  check('/output 列出四档', ['minimalist', 'concise', 'detailed', 'complete'].every((t) => String(tiers && tiers.message).includes(t)), String(tiers && tiers.message).slice(0, 120));
+
+  // 仍未实现的命令：诚实回执
+  mark = sent.length;
+  await say('/persona');
   const pend = await reply('还没实现', mark);
-  check('/output 明说还没实现', Boolean(pend), JSON.stringify(sent.slice(mark)));
+  check('/persona 明说还没实现', Boolean(pend), JSON.stringify(sent.slice(mark)));
 
   // admin 门槛：普通用户 /sessions all 被拒
   // allowUsers[0]=owner，其余=admin；所以只有 USER3（第三个）是普通 user

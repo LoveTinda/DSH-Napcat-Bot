@@ -26,6 +26,7 @@ import {
   parseCommand, helpText, helpFor, unknownCommandText, pendingCommandText,
 } from './commands.mjs';
 import { planDelivery, describeHumanize, DEFAULT_HUMANIZE } from './humanize.mjs';
+import { createTyping, describeTyping, DEFAULT_TYPING } from './typing.mjs';
 import { createGroupContext, DEFAULT_GROUP_CONTEXT } from './group-context.mjs';
 import { renderByTier, tierListText, normalizeTier, isTier, describeTier, compactNotice, DEFAULT_TIER } from './output.mjs';
 import { createRelay, DEFAULT_RELAY } from './relay.mjs';
@@ -63,6 +64,9 @@ const cfg = {
   humanizeMaxBubbles: clampInt(process.env.BRIDGE_HUMANIZE_MAX_BUBBLES, DEFAULT_HUMANIZE.maxBubbles, 1, 10),
   humanizeMaxChars: clampInt(process.env.BRIDGE_HUMANIZE_MAX_CHARS, DEFAULT_HUMANIZE.maxChars, 40, 2000),
   humanizeTotalDelayMs: clampInt(process.env.BRIDGE_HUMANIZE_TOTAL_DELAY_MS, DEFAULT_HUMANIZE.totalDelayCapMs, 0, 60000),
+  // 输入状态（③的漏项）：私聊里发「正在输入…」。NapCat 只实现了 C2C，群里发不出去。
+  typingEnabled: process.env.BRIDGE_TYPING !== '0',
+  typingKeepaliveMs: clampInt(process.env.BRIDGE_TYPING_KEEPALIVE_SEC, Math.round(DEFAULT_TYPING.keepaliveMs / 1000), 0, 120) * 1000,
   // 群上下文（④）：把「刚才在聊什么」带进提示词。0 = 关。
   groupContextEnabled: process.env.BRIDGE_GROUP_CONTEXT !== '0',
   groupContextMax: clampInt(process.env.BRIDGE_GROUP_CONTEXT_MAX, DEFAULT_GROUP_CONTEXT.maxMessages, 1, 50),
@@ -134,7 +138,7 @@ function redactText(value) {
 
 // ---------- 面板用的统计 ----------
 const startedAt = Date.now();
-const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied: 0, bubbles: 0 };
+const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied: 0, bubbles: 0, typingMsgs: 0 };
 let lastPlan = null;   // 最近一次分条投递：{ bubbles, chars, at }
 const events = [];               // 最近 100 条处理结果，只放元信息，不放聊天内容
 const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
@@ -296,6 +300,10 @@ function snapshot() {
     groupContext: {
       summary: groupCtx.describe(),
       ...groupCtx.stats(),
+    },
+    typing: {
+      summary: describeTyping({ enabled: cfg.typingEnabled, keepaliveMs: cfg.typingKeepaliveMs }),
+      messages: counts.typingMsgs || 0,
     },
     humanize: {
       summary: describeHumanize({
@@ -485,6 +493,33 @@ async function sendReply(info, text) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || (data && data.status && data.status !== 'ok')) {
     throw new Error(`发送失败 HTTP ${res.status} ${redactText(JSON.stringify(data)).slice(0, 200)}`);
+  }
+}
+
+/**
+ * 目的：给私聊发「正在输入」状态（NapCat 的 set_input_status）。
+ * 输入：info 聊天信息；eventType 0=开始、1=停止。
+ * 输出：无。
+ * 失败：HTTP 非 2xx 或 OneBot status!=ok 时抛错——由 createTyping 吞掉并记一行 warn，不影响回复。
+ * 副作用：一次本机 HTTP 请求。
+ */
+async function sendInputStatus(info, eventType) {
+  // 群聊没有这个能力（NapCat 只实现了 C2C），发了也是白发，直接跳过。
+  if (info.kind !== 'private') return;
+  const headers = { 'content-type': 'application/json' };
+  if (cfg.napcatToken) headers.authorization = `Bearer ${cfg.napcatToken}`;
+  // QQ 号是纯数字时按数字发：OneBot 实现里 user_id 要 number 的比要 string 的多。
+  const raw = String(info.userId ?? '');
+  const uid = /^\d+$/.test(raw) ? Number(raw) : raw;
+  const res = await fetch(`${cfg.napcatApi}/set_input_status`, {
+    method: 'POST',
+    headers,
+    signal: AbortSignal.timeout(5000),
+    body: JSON.stringify({ user_id: uid, event_type: eventType }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || (data && data.status && data.status !== 'ok')) {
+    throw new Error(`set_input_status 失败 HTTP ${res.status} ${redactText(JSON.stringify(data)).slice(0, 120)}`);
   }
 }
 
@@ -1140,6 +1175,14 @@ const server = http.createServer(async (req, res) => {
   counts.incoming++;
   enqueue(info.key, async () => {
     const started = Date.now();
+    // 输入状态（③ 的漏项）：私聊里先亮「正在输入…」；群里 NapCat 不支持，直接关。
+    const typing = createTyping({
+      enabled: cfg.typingEnabled && info.kind === 'private',
+      keepaliveMs: cfg.typingKeepaliveMs,
+      send: (type) => sendInputStatus(info, type),
+      onError: (e) => log('warn: 输入状态失败', redactText((e && e.message) || String(e))),
+    });
+    typing.start();
     try {
       const events = await askDsh(info);
       // 输出档位（⑤）：同一轮事件，按当前聊天选的档位渲染成要发的文字
@@ -1183,6 +1226,10 @@ const server = http.createServer(async (req, res) => {
       const errText = r.relay ? r.text : `出错了：${redactText(e.message).slice(0, 200)}`;
       if (r.relay) record('skip', info.key, ms, '进入维护期，已回维护文案');
       try { await deliver(info, errText); } catch (e2) { log('fail:reply', redactText(e2.message)); }
+    } finally {
+      // 成功、失败、提前 return 都要关：否则对面会一直看到「正在输入…」。
+      typing.stop();
+      counts.typingMsgs += typing.stats().sent > 0 ? 1 : 0;
     }
   });
 });

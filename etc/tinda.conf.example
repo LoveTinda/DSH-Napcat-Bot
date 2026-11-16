@@ -51,6 +51,12 @@ BRIDGE_HUMANIZE_MAX_CHARS=240
 # 整轮条间停顿总和上限（毫秒，0–60000）：等太久像挂了
 BRIDGE_HUMANIZE_TOTAL_DELAY_MS=4000
 
+# ---- 输入状态（③）----
+# 私聊里发「正在输入…」（NapCat set_input_status；群聊它没实现，发了也无效）。0 = 关。
+BRIDGE_TYPING=1
+# 续期间隔（秒，0–120）：NapCat 侧的输入状态会自己消失，8 秒续一次刚好接上；0 = 只亮一次
+BRIDGE_TYPING_KEEPALIVE_SEC=8
+
 # ---- 群上下文（④）----
 # 群里没 @ 的闲聊也记下来；被 @ 时把最近几条带进提示词。0 = 关。
 BRIDGE_GROUP_CONTEXT=1

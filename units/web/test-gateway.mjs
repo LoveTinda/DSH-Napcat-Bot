@@ -5,6 +5,7 @@
 // 副作用：占用本机 16811–16815 端口；结束后全部关闭。
 
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
@@ -15,6 +16,8 @@ const BRIDGE_PORT = 16813;
 const DSH_PORT = 16814;
 const NAPCAT_PORT = 16815;
 const TOKEN = 'test-token-123456';
+const NAPCAT_TOKEN = 'napcat-token-abcdef';
+let loginCalls = 0;
 const base = 'http://127.0.0.1:' + GW_PORT;
 
 let pass = 0, fail = 0;
@@ -45,6 +48,20 @@ const dsh = fake('dsh', (req, res) => {
   res.writeHead(401, { 'content-type': 'text/plain' }); res.end('dsh-unauthorized');
 });
 const napcat = fake('napcat', (req, res) => {
+  if (req.url === '/api/auth/login') {
+    // 照抄真实 NapCat 的契约：body 里是 hash，对了才给 Credential。
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const want = crypto.createHash('sha256').update(NAPCAT_TOKEN + '.napcat').digest('hex');
+      let got = '';
+      try { got = JSON.parse(body).hash; } catch {}
+      res.writeHead(200, { 'content-type': 'application/json' });
+      if (got === want) { loginCalls++; return res.end('{"code":0,"data":{"Credential":"cred-from-napcat"}}'); }
+      res.end('{"code":-1,"message":"token is invalid"}');
+    });
+    return;
+  }
   res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html>napcat</html>');
 });
 await Promise.all([
@@ -65,7 +82,7 @@ const env = {
   WEB_NAPCAT_ORIGIN_PORT: '0',
   WEB_REDIRECT_PORT: '0',
   WEB_HTTP_PORT: '0',
-  NAPCAT_WEBUI_TOKEN: '',
+  NAPCAT_WEBUI_TOKEN: NAPCAT_TOKEN,
   NODE_OPTIONS: '',
 };
 delete env.WEB_TLS_CERT; delete env.WEB_TLS_KEY; delete env.WEB_ALLOW_NO_TOKEN;
@@ -117,8 +134,24 @@ try {
   const origin = await fetch('http://127.0.0.1:' + ORIGIN_PORT + '/', { headers: { cookie: 'tinda=' + TOKEN, accept: 'text/html' } });
   check('独立根端口可用', origin.status === 401 && (await origin.text()).includes('DSH 面板不让代理代签'));
 
-  const logout = await fetch(base + '/logout', { redirect: 'manual' });
-  check('/logout 清 cookie', logout.status === 302 && /Max-Age=0/i.test(logout.headers.get('set-cookie') || ''));
+  // NapCat 面板免登录：网关自己换 Credential，写进引导页，不往地址栏塞 token。
+  const boot = await fetch(base + '/napcat/', { headers: { cookie: 'tinda=' + TOKEN, accept: 'text/html' } });
+  const bootHtml = await boot.text();
+  check('NapCat 入口返回引导页', boot.status === 200 && bootHtml.includes('localStorage.setItem("token"'), bootHtml.slice(0, 160));
+  check('引导页写的是 Credential', bootHtml.includes('cred-from-napcat'), bootHtml.slice(0, 160));
+  check('引导页不泄露 NapCat token', !bootHtml.includes(NAPCAT_TOKEN), bootHtml.slice(0, 160));
+  check('首屏登录只用一次', loginCalls === 1, 'loginCalls=' + loginCalls);
+
+  const boot2 = await fetch(base + '/webui/', { headers: { cookie: 'tinda=' + TOKEN, accept: 'text/html' } });
+  check('第二个入口复用缓存', boot2.status === 200 && loginCalls === 1, 'loginCalls=' + loginCalls);
+
+  const afterBoot = await fetch(base + '/napcat/?__login=1', { headers: { cookie: 'tinda=' + TOKEN, accept: 'text/html' } });
+  const afterBody = await afterBoot.text();
+  const lastNapcat = seen.filter((s) => s.name === 'napcat').pop();
+  check('带标记时直接反代', afterBoot.status === 200 && afterBody.includes('napcat'), afterBody.slice(0, 80));
+  check('__login 不透给下游', lastNapcat && !/__login/.test(lastNapcat.url || ''), lastNapcat && lastNapcat.url);
+
+  const logout = await fetch(base + '/logout', { redirect: 'manual' });  check('/logout 清 cookie', logout.status === 302 && /Max-Age=0/i.test(logout.headers.get('set-cookie') || ''));
 
   // 失败关闭：没有 token 且未显式允许时，必须拒绝启动。
   const noToken = spawn(process.execPath, [path.join(here, 'gateway.mjs')], {

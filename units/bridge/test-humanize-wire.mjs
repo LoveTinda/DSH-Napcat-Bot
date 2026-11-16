@@ -60,6 +60,8 @@ async function runOnce(port, extraEnv) {
       BRIDGE_SEEN_FILE: '',
       BRIDGE_POLICY_FILE: '',
       BRIDGE_MAX_EVENT_AGE_SEC: '0',
+      // 本测试数的是「发了几条消息」，输入状态会多出请求，关掉更干净
+      BRIDGE_TYPING: '0',
       ALERT_QQ: '',
       ...extraEnv,
     },

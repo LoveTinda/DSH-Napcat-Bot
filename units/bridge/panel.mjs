@@ -285,6 +285,10 @@ function renderOverview(s) {
   const hu = s.humanize || {};
   const lastHu = hu.last ? ' · 最近 ' + hu.last.bubbles + ' 条 / ' + hu.last.chars + ' 字' : '';
   row('拟人化投递', (hu.summary || '未知') + lastHu);
+
+  // 输入状态：私聊里那三个点。只显示开关与轮数，不含任何聊天内容。
+  const ty = s.typing || {};
+  row('输入状态', (ty.summary || '未知') + (ty.messages ? ' · 已亮 ' + ty.messages + ' 轮' : ''));
 }
 
 function renderSessions(s) {

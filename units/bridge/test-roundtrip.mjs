@@ -91,6 +91,8 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     BRIDGE_SEND_DRAIN_MS: '500', // 补发轮询加快，测试不用等 15 秒
     ALERT_QQ: '',
     BRIDGE_MAX_EVENT_AGE_SEC: '120',
+    // 本测试数的是「发了几条消息」，输入状态会多出请求，关掉更干净
+    BRIDGE_TYPING: '0',
     BRIDGE_SEEN_FILE: '',
     BRIDGE_POLICY_FILE: policyFile,
   },

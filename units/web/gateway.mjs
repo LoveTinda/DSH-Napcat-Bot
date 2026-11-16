@@ -6,6 +6,7 @@
  * 失败：下游不可达返回 502 + 可读原因；token 为空且未显式允许时拒绝启动（失败关闭）。
  * 安全：默认只监听 127.0.0.1；设 WEB_BIND=0.0.0.0 才对外，且必须有 WEB_TOKEN。
  *       网关 cookie 为 HttpOnly，不写进 URL/HTML；转发给下游前会去掉这枚 cookie。
+ *       NapCat 面板由网关代登录：Credential 只写进引导页正文，不落在地址栏和浏览器历史里。
  */
 import http from 'node:http';
 import https from 'node:https';
@@ -171,6 +172,114 @@ function serveUi(res) {
   res.end(LANDING);
 }
 
+// ---- NapCat 面板免登录 ----
+// NapCat 的 WebUI 登录流程（读它的前端 bundle 得到，不是猜的）：
+//   hash = SHA256(token + '.napcat')  →  POST /api/auth/login {hash}  →  {code:0,data:{Credential}}
+//   前端把 Credential 以 JSON 字符串写进 localStorage['token']，之后每个请求带 Authorization: Bearer <Credential>。
+// Credential 只认 1 小时；过期后前端会清掉 localStorage 并刷新 —— 正好由下面的引导页重新发一份。
+// 缓存 45 分钟：一次登录够用，避免每开一次面板都要打一次 /api/auth/login。
+const NAPCAT_CRED_TTL_MS = 45 * 60 * 1000;
+const NAPCAT_DOC_PATHS = new Set(['/', '/webui', '/webui/']);
+let napcatCred = { value: '', at: 0 };
+
+/** 目的：判断这个路径是不是 NapCat 的页面入口（只有页面才需要引导登录，静态资源不碰）。 */
+function isNapcatDocument(subPath) {
+  return NAPCAT_DOC_PATHS.has(subPath);
+}
+
+/** 目的：去掉只给网关看的 __login 标记，别让下游 SPA 的地址栏里多一个陌生参数。 */
+function stripLoginMarker(search) {
+  const p = new URLSearchParams(String(search).replace(/^\?/, ''));
+  p.delete('__login');
+  const s = p.toString();
+  return s ? '?' + s : '';
+}
+
+/**
+ * 目的：用网关手里的 token 向 NapCat 换一张 Credential。
+ * 输入：无（token 来自 NAPCAT_WEBUI_TOKEN，端口来自 UPSTREAMS）。
+ * 输出：成功返回 Credential 字符串；没配 token、连不上、返回错误码都返回空串。
+ * 失败：不抛错、不重试；返回空串，调用方降级成「显示它自己的登录页」。
+ * 副作用：一次本机 POST。
+ */
+function loginNapcat() {
+  return new Promise((resolve) => {
+    const up = UPSTREAMS['/napcat/'];
+    const body = JSON.stringify({
+      hash: crypto.createHash('sha256').update(NAPCAT_TOKEN + '.napcat').digest('hex'),
+    });
+    const req = http.request({
+      host: up.host,
+      port: up.port,
+      path: '/api/auth/login',
+      method: 'POST',
+      timeout: 5000,
+      headers: { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          const cred = data && data.code === 0 && data.data && data.data.Credential;
+          resolve(cred ? String(cred) : '');
+        } catch (e) {
+          console.error('[web] NapCat 登录响应不是 JSON：' + e.message);
+          resolve('');
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve(''); });
+    req.on('error', (e) => { console.error('[web] NapCat 登录失败：' + (e.code || e.message)); resolve(''); });
+    req.end(body);
+  });
+}
+
+/** 目的：拿到当前有效的 Credential（优先用缓存）。 */
+async function napcatCredential() {
+  if (napcatCred.value && Date.now() - napcatCred.at < NAPCAT_CRED_TTL_MS) return napcatCred.value;
+  const value = await loginNapcat();
+  napcatCred = { value, at: value ? Date.now() : 0 };
+  return value;
+}
+
+/** 目的：拼一张「写 localStorage 然后跳回面板」的引导页；Credential 只进页面正文，不进地址栏。 */
+function napcatBootstrapHtml(cred, target) {
+  const stored = JSON.stringify(JSON.stringify(cred)).replace(/</g, '\\u003c');
+  const url = JSON.stringify(target).replace(/</g, '\\u003c');
+  const href = target.replace(/&/g, '&amp;');
+  return '<!doctype html><meta charset="utf-8"><title>正在进入 NapCat</title>' +
+    '<style>body{font:15px/1.7 system-ui;margin:0;padding:2rem 1.2rem;background:#0f1115;color:#e6e6e6}' +
+    'a{color:#6cf}p{color:#a7b0bd}</style>' +
+    '<h2>正在进入 NapCat</h2><p>网关已经替你登录，不需要输入 token。</p>' +
+    '<script>try{localStorage.setItem("token", ' + stored + ');}catch(e){}' +
+    'location.replace(' + url + ');<\/script>' +
+    '<p>没反应？<a href="' + href + '">点这里</a>。</p>';
+}
+
+/**
+ * 目的：给 NapCat 页面入口返回引导页，替浏览器把登录做完。
+ * 输入：subPath 页面路径、search 查询串（可能带 __login 标记）。
+ * 输出：true 表示已经自己回了响应；false 表示这次不该接管，交回反代。
+ * 失败：换不到 Credential 就返回 false，退回 NapCat 自带登录页（不阻塞、不报错页）。
+ * 副作用：可能写一次响应；可能触发一次登录请求（有缓存）。
+ */
+async function napcatBootstrap(res, subPath, search) {
+  // 带标记说明已经在引导页转过一圈，别再套娃。
+  if (new URLSearchParams(String(search).replace(/^\?/, '')).get('__login') === '1') return false;
+  const cred = await napcatCredential();
+  if (!cred) return false;
+  const rest = stripLoginMarker(search);
+  const target = subPath + (rest ? rest + '&__login=1' : '?__login=1');
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'referrer-policy': 'no-referrer',
+  });
+  res.end(napcatBootstrapHtml(cred, target));
+  return true;
+}
+
 /**
  * 目的：把一次请求转发给某个下游，并处理重定向前缀、NapCat token 自动补齐、错误兜底。
  * 输入：prefix 是下游键（如 '/napcat/'），subPath 是发给下游的路径，search 是查询串。
@@ -178,7 +287,18 @@ function serveUi(res) {
  * 失败：下游错误返回 502；不重试。
  * 副作用：发网络请求；不改正文。
  */
-function forward(prefix, subPath, search, req, res, mappedRoot = false) {
+async function forward(prefix, subPath, search, req, res, mappedRoot = false) {
+  // NapCat 面板的凭据只存在浏览器 localStorage 里，网关读不到。
+  // 把 token 塞进「转发给下游」的查询串是没用的：SPA 读的是浏览器地址栏。
+  // 改成网关用它自己替浏览器登录一次，把拿到的 Credential 写进一个小页面，再跳回面板。
+  // 好处：地址栏里不出现任何 token，凭据 1 小时过期后刷新一次就自愈。
+  if (prefix === '/napcat/' && NAPCAT_TOKEN && req.method === 'GET' && isNapcatDocument(subPath)) {
+    if (await napcatBootstrap(res, subPath, search)) return;
+  }
+  return proxyForward(prefix, subPath, search, req, res, mappedRoot);
+}
+
+function proxyForward(prefix, subPath, search, req, res, mappedRoot = false) {
   const up = UPSTREAMS[prefix];
   // NapCat 的 WebUI 自带一套 token，和网关的 token 是两回事。
   // 这里自动补上，免得用户打开面板还要手输一次。
@@ -186,6 +306,8 @@ function forward(prefix, subPath, search, req, res, mappedRoot = false) {
   // （实测 /api/auth/login?token=… 直接返回 Unauthorized）。
   const isApi = /^\/api(\/|$)/.test(subPath);
   let qs = search;
+  // 只给网关自己看的标记，不能透给下游的 SPA。
+  if (prefix === '/napcat/' && qs.includes('__login=')) qs = stripLoginMarker(qs);
   if (prefix === '/napcat/' && NAPCAT_TOKEN && !isApi && !/[?&]token=/.test(qs)) {
     qs += (qs ? '&' : '?') + 'token=' + encodeURIComponent(NAPCAT_TOKEN);
   }

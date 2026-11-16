@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## v0.2.31
+- **补回「输入状态」（③ 的漏项）**：旧桥接器每轮私聊都会调 NapCat 的 `set_input_status`
+  亮「正在输入…」，这次重建时整块丢了。新增 `units/bridge/typing.mjs`——
+  开始即亮、每 8 秒续期、`finally` 里必关；只对私聊发（NapCat 只实现了 C2C）
+- 配置：`BRIDGE_TYPING`、`BRIDGE_TYPING_KEEPALIVE_SEC`；面板加一行「输入状态」
+- 对照旧源码的结论：分条回复与延迟回复**没丢**（`humanize.mjs` 已实现），
+  但参数比旧版保守（3 条/240 字/350–1800ms 对旧版 6 条/320 宽/700–5200ms），
+  旧 persona 的默认值已存进 `docs/拟人化-复原对照.md`
+- 测试：`test-typing` 15 项、`test-typing-wire` 9 项（私聊亮起、结束必关、群里不发、开关能关）
+- 顺手修 `test-commands-wire` 的过期断言：`/output` 在 v0.2.28 已转正，测试还在要求它回「还没实现」
+
+## v0.2.30
+- 修掉 `token is invalid` 的**根因**：NapCat 的登录凭据只存在浏览器 `localStorage`，
+  而网关只把 token 补进「转发给下游」的查询串——SPA 读的是**浏览器地址栏**，补了个空
+- 现在网关自己登录：`POST /api/auth/login {hash: sha256(token+'.napcat')}` 换 Credential，
+  返回一张引导页写 `localStorage.token` 再跳回面板。地址栏不出现 token，凭据 45 分钟复用，
+  1 小时过期后刷新一次自动续。换不到（NapCat 没起/没配 token）就退回它自带的登录页
+- 控制台「重置面板」按钮和 `/reset` 保留：清浏览器凭据仍然是最快的排障手段
+- 测试：`units/web/test-gateway.mjs` 加 7 条（引导页写入 Credential、不泄露 token、
+  首屏只登录一次、第二入口复用缓存、带标记时直接反代、`__login` 不透给下游）
+
 ## v0.2.29
 - 修复「NapCat 面板提示 token is invalid 却没地方救」：新增 `/reset` 页（8443 与各面板端口都有），
   清掉该 origin 的 `localStorage`/`sessionStorage` 与网关 cookie 后回首页

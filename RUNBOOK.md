@@ -264,8 +264,8 @@ git clone /sdcard/backup/tinda-bot-<版本>-<时间>/repo.bundle ~/tinda-restore
 | 桥接面板 502 | `unit.sh status bridge` / `logs bridge` | 网关的 `BRIDGE_PANEL_PORT` 是从 `BRIDGE_LISTEN` 推导的；桥接器没起或端口不一致 |
 | 桥接面板能开但数字不动 | 浏览器控制台 Network | 页面取的是相对 `state.json`；确认 `/bridge/state.json` 返回 200，不是 401/404 |
 | 面板一片空白 | 浏览器开 8445 直接访问 | 前端写死绝对路径 `/webui/assets`、`/api/…`，必须走独立端口 |
-| NapCat 面板登录失败 | `POST /api/auth/login` 的 `hash` | 少了 `?token=` 会白屏、多了会让 login 直接 Unauthorized；网关只给页面补 |
-| NapCat 面板提示 `token is invalid` | 浏览器里存的凭据 | 这是 NapCat 服务端对**错的 hash** 的原话（实测：错误 hash → `{"code":-1,"message":"token is invalid"}`）。凭据只存在浏览器 localStorage、1 小时过期，换过 token 也会失效。点控制台右上角**重置面板**，或直接开 `https://<IP>:8445/reset`（清 localStorage 后回首页），再进 NapCat 标签，会自动带上正确 token |
+| NapCat 面板登录失败 | `POST /api/auth/login` 的 `hash` | `hash = sha256(token + ".napcat")`（读它前端 bundle 得到的，不是猜的）。网关现在自己登录并把 Credential 写进应用层引导页，浏览器地址栏不出现 token |
+| NapCat 面板提示 `token is invalid` | 浏览器里存的凭据 | 这是 NapCat 服务端对**错的 hash** 的原话（实测：错误 hash → `{"code":-1,"message":"token is invalid"}`）。凭据只存在浏览器 localStorage、1 小时过期，换过 token 也会失效。点控制台右上角**重置面板**，或直接开 `https://<IP>:8445/reset`（清 localStorage 后回首页），再进 NapCat 标签（网关会重新换一张 Credential，不需要你输任何东西） |
 | QQ 掉线 | `unit.sh logs napcat` 有没有「快速登录」 | 没注入 `-q`，退化成扫码 |
 | 桥接器收到不回复 | `logs bridge` | DSH 报 `MISSING_CREDENTIAL` / `ACCOUNT_SIGN_IN_REQUIRED`，查配置说明 §8 的 patch |
 | 回复发不出去 | `3001/get_status` | `httpServers` 没开，或 `secrets/napcat.token` 和 NapCat 里写的不一致 |

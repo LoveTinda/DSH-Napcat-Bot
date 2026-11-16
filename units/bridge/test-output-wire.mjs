@@ -89,6 +89,8 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     BRIDGE_SUMMARY_FILE: path.join(tmp, 'summaries.json'),
     BRIDGE_POLICY_FILE: policyFile,
     BRIDGE_MAX_EVENT_AGE_SEC: '0',
+    // 本测试数的是「发了几条消息」，输入状态会多出请求，关掉更干净
+    BRIDGE_TYPING: '0',
     BRIDGE_HUMANIZE: '0',
     BRIDGE_SEND_RETRY: '1',
     BRIDGE_RELAY_AFTER: '2',
