@@ -68,6 +68,12 @@
     "diskPercent": 74,
     "diskAlertPercent": 90
   },
+  "interactions": {
+    "summary": "开 · 每轮最多 2 个 · 总时限 2500ms · 群 poke 关",
+    "enabled": true,
+    "last": { "at": 1763200000000, "executed": 1, "failed": 0, "skipped": 0, "kinds": ["react"] },
+    "totals": { "turns": 2, "executed": 3, "failed": 0, "skipped": 1 }
+  },
   "sessions": [
     {
       "key": "private:20001",
@@ -128,6 +134,10 @@
 | `counts.busy` | number | 有排队/处理中任务的聊天数 |
 | `counts.outbox` | number | 当前待补发的回复条数 |
 | `counts.requeued` | number | 累计进入补发队列的次数（只增） |
+| `interactions.summary` | string | 交互动作开关、每轮上限、总时限、群 poke 状态 |
+| `interactions.enabled` | boolean | 总开关；false 时正文标记原样保留 |
+| `interactions.last` | object \| null | 最近一轮动作：执行/失败/跳过数、动作种类；没有执行过为 null |
+| `interactions.totals` | object | 累计轮数、执行数、失败数、跳过数 |
 | `alerts.qq` | string | 告警接收人（打码）；未设置时为 `(未设置)` |
 | `alerts.sent` / `suppressed` | number | 已发告警条数 / 被冷却压掉的次数 |
 | `alerts.streak` | number | 当前连续失败次数（成功一次清零） |
@@ -155,7 +165,7 @@
 ### 4.1 概览
 
 - 指标卡：收到消息、成功回复、失败、跳过、排队中、待补发、运行时长。
-- 信息行：后端、监听、NapCat API、状态文件、补发队列、告警接收、磁盘占用。
+- 信息行：后端、监听、NapCat API、状态文件、补发队列、告警接收、磁盘占用、交互动作。
 - 失败/排队/待补发 > 0 时数字用警示色。
 
 ### 4.2 会话
@@ -172,7 +182,7 @@
 
 ### 4.4 配置
 
-- 按组展示：连接、行为、DSH、回发与告警、其它。
+- 按组展示：连接、行为、交互动作、DSH、回发与告警、其它。
 - 值只读；空值显示 `(空)`；布尔显示 `开/关`。
 - 底部提示：改 `$DATA/etc/tinda.conf` 后 `bin/unit.sh restart bridge`。
 - **没有保存按钮**，这是安全边界，不是漏做。
@@ -229,6 +239,7 @@
 - 手动刷新/错误条/跳过卡片存在
 - 事件秒回 204、成功计数、会话出现、事件无正文、排队归零
 - 空消息计入跳过、skip 事件进入事件流、不回发
+- 快照里有交互动作配置与统计；面板页有「交互动作」一行
 
 人工验收：
 

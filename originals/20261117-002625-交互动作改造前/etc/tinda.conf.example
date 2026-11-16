@@ -1,0 +1,115 @@
+# 目的：模块级配置。真配置放 $DATA/etc/tinda.conf（0600，不入库）。
+# 边界：这里只放 bin/*.sh 真的会读的键。每个键在 docs/配置说明.md 都有一行说明。
+# 说明：Magisk 形态下 $DATA=/data/adb/tinda-bot；仓库内直跑时 $DATA=<仓库>/.runtime。
+#      首次运行任一 bin/*.sh 会自动把它复制到 $DATA/etc/tinda.conf，之后改那份。
+
+# ---- 日志 ----
+LOG_MAX_MB=50
+
+# ---- 单元看守 ----
+# 退避重启的等待上限（秒）。连续失败次数上限在 units/<name>/unit.conf 的 RESTART_MAX。
+RESTART_BACKOFF_MAX=60
+
+# ---- 资源上限（T-4）----
+# node 单元的 V8 堆上限（MB）：桥接器 / 网关。超过就 GC/退出，不会把手机内存吃光。
+BRIDGE_HEAP_MB=256
+WEB_HEAP_MB=192
+# node 单元的 fd 软上限；抬不上去时保留系统值并记一条 warn。
+UNIT_MAX_OPEN_FILES=4096
+
+# ---- 桥接器（units/bridge）----
+# OneBot 11 事件入口。NapCat 的 httpClients 往这里推。
+BRIDGE_LISTEN=127.0.0.1:6700
+# 后端：headless（每轮 spawn 一次 dsh）/ echo（自测，原样回显）
+BRIDGE_BACKEND=headless
+# 是否处理群消息；0 = 只听私聊
+BRIDGE_ALLOW_GROUP=1
+# 单轮最长等待，超时杀子进程并回一条错误
+BRIDGE_TIMEOUT_MS=180000
+# 透传给 dsh headless --permission-mode；空 = 用 profile 默认
+BRIDGE_PERMISSION_MODE=
+# 重连补推的旧事件超过多少秒就不回答（0 = 不限制）；避免重启后回答十几分钟前的消息
+BRIDGE_MAX_EVENT_AGE_SEC=120
+# 回发失败时原地重试几次（1–10），仍失败就进补发队列
+BRIDGE_SEND_RETRY=3
+# 补发队列轮询间隔（毫秒，500–600000）
+BRIDGE_SEND_DRAIN_MS=15000
+# 补发队列里一条回复最多留多久（毫秒，默认 6 小时；过期丢弃，避免断网一天后刷屏）
+BRIDGE_OUTBOX_TTL_MS=21600000
+
+# 回复策略文件（①）：JSON，模板见 etc/bridge-policy.example.json。
+# 留空/文件不存在 = 默认策略（私聊全接、群必须 @），面板会标「未加固」。
+BRIDGE_POLICY_FILE=
+
+# ---- 拟人化投递（③）----
+# 一条回复拆成几条发、条间停顿多久。0 = 关掉，整条一次发完。
+BRIDGE_HUMANIZE=1
+# 最多几条：超过就把剩下的并进最后一条（刷屏比长一条更烦）
+BRIDGE_HUMANIZE_MAX_BUBBLES=3
+# 单条字数上限（40–2000）
+BRIDGE_HUMANIZE_MAX_CHARS=240
+# 整轮条间停顿总和上限（毫秒，0–60000）：等太久像挂了
+BRIDGE_HUMANIZE_TOTAL_DELAY_MS=4000
+
+# ---- 输入状态（③）----
+# 私聊里发「正在输入…」（NapCat set_input_status；群聊它没实现，发了也无效）。0 = 关。
+BRIDGE_TYPING=1
+# 续期间隔（秒，0–120）：NapCat 侧的输入状态会自己消失，8 秒续一次刚好接上；0 = 只亮一次
+BRIDGE_TYPING_KEEPALIVE_SEC=8
+
+# ---- 群上下文（④）----
+# 群里没 @ 的闲聊也记下来；被 @ 时把最近几条带进提示词。0 = 关。
+BRIDGE_GROUP_CONTEXT=1
+# 每个群留几条（1–50）
+BRIDGE_GROUP_CONTEXT_MAX=8
+# 注入块字数上限（100–8000）
+BRIDGE_GROUP_CONTEXT_CHARS=1200
+
+# ---- 输出档位与自动压缩（⑤）----
+# 默认档位：minimalist（只发总结）/ concise / detailed / complete
+BRIDGE_OUTPUT_DEFAULT=minimalist
+# 同一聊天聊满多少轮就把前文压成摘要、换新会话（0 = 关）
+BRIDGE_AUTO_COMPACT_ROUNDS=15
+
+# ---- 维护期自动回复（⑤）----
+# DSH 连续失败几次后统一回维护文案（0 = 关）
+BRIDGE_RELAY=1
+BRIDGE_RELAY_AFTER=3
+# 维护文案的冷却秒数：冷却内只回一次
+BRIDGE_RELAY_COOLDOWN_SEC=120
+BRIDGE_RELAY_MESSAGE=机器人正在维护，稍后再试。
+
+# ---- 告警（O-4）----
+# 告警接收的 QQ 号；留空 = 关（连续失败/磁盘告警都不发）
+ALERT_QQ=
+# 连续失败几次发一次告警（1–100）
+ALERT_FAIL_STREAK=3
+# 同一类告警的最小间隔（秒，60–86400）
+ALERT_COOLDOWN_SEC=1800
+# 数据目录所在分区用到百分之几就告警（50–99）
+DISK_ALERT_PERCENT=90
+
+# ---- OneBot 回发（桥接器 → NapCat）----
+NAPCAT_API=http://127.0.0.1:3001
+# napcat-wire-onebot.sh 给 NapCat 开 HTTP API 用的端口（应与 NAPCAT_API 的端口一致）
+NAPCAT_HTTP_PORT=3001
+# NapCat 的 WebUI 配置，网关从这里读它自己的 token，自动带给面板
+NAPCAT_WEBUI_JSON=/opt/napcat/config/webui.json
+
+# ---- DSH 后端 ----
+DSH_NODE=
+DSH_BIN=/opt/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js
+DSH_HOME=/root/.dsh
+
+# ---- 统一 Web 网关（units/web）----
+WEB_BIND=0.0.0.0
+WEB_PORT=8443
+# 明文 301 跳到 8443；0 = 关
+WEB_REDIRECT_PORT=8088
+# 自签证书 SAN 里写哪个局域网地址
+WEB_LAN_IP=192.168.1.3
+# 各面板的根路径端口：它们的前端用绝对路径，挤在 8443 的前缀下面会 404
+WEB_DSH_ORIGIN_PORT=8444
+WEB_NAPCAT_ORIGIN_PORT=8445
+# 证书装不进信任库时的逃生口：明文直连端口（默认 0 = 关，仅调试）
+WEB_HTTP_PORT=0

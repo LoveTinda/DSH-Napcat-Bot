@@ -30,6 +30,9 @@ import { createTyping, describeTyping, DEFAULT_TYPING } from './typing.mjs';
 import { createGroupContext, DEFAULT_GROUP_CONTEXT } from './group-context.mjs';
 import { renderByTier, tierListText, normalizeTier, isTier, describeTier, compactNotice, DEFAULT_TIER } from './output.mjs';
 import { createRelay, DEFAULT_RELAY } from './relay.mjs';
+import {
+  parseActions, runActions, interactionHint, describeInteractions, DEFAULT_INTERACTIONS,
+} from './interactions.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -71,6 +74,12 @@ const cfg = {
   groupContextEnabled: process.env.BRIDGE_GROUP_CONTEXT !== '0',
   groupContextMax: clampInt(process.env.BRIDGE_GROUP_CONTEXT_MAX, DEFAULT_GROUP_CONTEXT.maxMessages, 1, 50),
   groupContextChars: clampInt(process.env.BRIDGE_GROUP_CONTEXT_CHARS, DEFAULT_GROUP_CONTEXT.maxChars, 100, 8000),
+  // 交互动作（P0-1）：模型在正文里写 [[react:赞]] / [[recall]] / [[poke]]，桥接器执行后删标记。
+  // 关闭时标记原样保留（不解析、不注入提示），避免用户以为开关坏了。
+  interactionsEnabled: process.env.BRIDGE_INTERACTIONS !== '0',
+  interactionsGroupPoke: process.env.BRIDGE_INTERACTIONS_GROUP_POKE === '1',
+  interactionsMax: clampInt(process.env.BRIDGE_INTERACTIONS_MAX, DEFAULT_INTERACTIONS.maxActions, 1, 5),
+  interactionsTimeoutMs: clampInt(process.env.BRIDGE_INTERACTIONS_TIMEOUT_MS, DEFAULT_INTERACTIONS.timeoutMs, 100, 10000),
   // 输出档位（⑤）：每个聊天一份，默认极简。
   outputDefault: normalizeTier(process.env.BRIDGE_OUTPUT_DEFAULT || DEFAULT_TIER),
   outputFile: process.env.BRIDGE_OUTPUT_FILE || '',
@@ -140,6 +149,9 @@ function redactText(value) {
 const startedAt = Date.now();
 const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied: 0, bubbles: 0, typingMsgs: 0 };
 let lastPlan = null;   // 最近一次分条投递：{ bubbles, chars, at }
+let lastInteractions = null;   // 最近一轮动作：{ at, executed, failed, skipped, kinds }
+const interactionTotals = { turns: 0, executed: 0, failed: 0, skipped: 0 };
+const hintedSessions = new Set();   // 已经拼过交互提示的 DSH 会话 id（进程重启后重注一次无害）
 const events = [];               // 最近 100 条处理结果，只放元信息，不放聊天内容
 const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
 const seenIds = new Set();       // self_id:message_id，防 NapCat 重推导致同一条被回答两次
@@ -305,6 +317,17 @@ function snapshot() {
       summary: describeTyping({ enabled: cfg.typingEnabled, keepaliveMs: cfg.typingKeepaliveMs }),
       messages: counts.typingMsgs || 0,
     },
+    interactions: {
+      summary: describeInteractions({
+        enabled: cfg.interactionsEnabled,
+        groupPoke: cfg.interactionsGroupPoke,
+        maxActions: cfg.interactionsMax,
+        timeoutMs: cfg.interactionsTimeoutMs,
+      }),
+      enabled: cfg.interactionsEnabled,
+      last: lastInteractions,
+      totals: { ...interactionTotals },
+    },
     humanize: {
       summary: describeHumanize({
         enabled: cfg.humanizeEnabled,
@@ -345,6 +368,10 @@ function snapshot() {
       BRIDGE_GROUP_CONTEXT: cfg.groupContextEnabled ? 1 : 0,
       BRIDGE_GROUP_CONTEXT_MAX: cfg.groupContextMax,
       BRIDGE_GROUP_CONTEXT_CHARS: cfg.groupContextChars,
+      BRIDGE_INTERACTIONS: cfg.interactionsEnabled ? 1 : 0,
+      BRIDGE_INTERACTIONS_GROUP_POKE: cfg.interactionsGroupPoke ? 1 : 0,
+      BRIDGE_INTERACTIONS_MAX: cfg.interactionsMax,
+      BRIDGE_INTERACTIONS_TIMEOUT_MS: cfg.interactionsTimeoutMs,
       BRIDGE_OUTPUT_DEFAULT: cfg.outputDefault,
       BRIDGE_OUTPUT_FILE: cfg.outputFile || '(不落盘)',
       BRIDGE_AUTO_COMPACT_ROUNDS: cfg.autoCompactRounds,
@@ -494,6 +521,8 @@ async function sendReply(info, text) {
   if (!res.ok || (data && data.status && data.status !== 'ok')) {
     throw new Error(`发送失败 HTTP ${res.status} ${redactText(JSON.stringify(data)).slice(0, 200)}`);
   }
+  // 撤回需要 message_id；旧实现没返回，导致「删本轮气泡」无从下手（P0-1）。
+  return data && data.data ? data.data.message_id : undefined;
 }
 
 /**
@@ -614,8 +643,7 @@ async function deliver(info, text) {
   let last = null;
   for (let i = 0; i < cfg.sendRetry; i++) {
     try {
-      await sendReply(info, text);
-      return;
+      return await sendReply(info, text);
     } catch (e) {
       last = e;
       if (i + 1 < cfg.sendRetry) {
@@ -628,10 +656,11 @@ async function deliver(info, text) {
 }
 
 /**
- * 目的：按拟人化计划把一条回复拆成几段发出去（段间停顿）。
+ * 目的：按拟人化计划把一条回复拆成几段发出去（段间停顿），并收集每段的 message_id。
  * 输入：info 路由、text 原文；计划参数来自 cfg.humanize*。
- * 输出：成功时返回实际发出的段数；失败抛错，错误里带已发出的段数（remaining）。
- * 失败：任一段重试用尽即抛，由调用方把剩下的进补发队列。
+ * 输出：成功时返回 { bubbles, messageIds }；messageId 缺失时只计段数。
+ * 失败：任一段重试用尽即抛，错误里带已发出的段数（remaining）与已发出的 id（messageIds），
+ *       由调用方把剩下的进补发队列。
  * 副作用：发网络请求、sleep。
  */
 async function deliverHuman(info, text) {
@@ -642,19 +671,22 @@ async function deliverHuman(info, text) {
     totalDelayCapMs: cfg.humanizeTotalDelayMs,
   };
   const plan = planDelivery(String(text ?? '').slice(0, MAX_REPLY_CHARS), opts);
+  const messageIds = [];
   for (let i = 0; i < plan.length; i++) {
     const item = plan[i];
     if (item.delayMs > 0) await sleep(item.delayMs);
     try {
-      await deliver(info, item.text);
+      const id = await deliver(info, item.text);
+      if (id != null && id !== '') messageIds.push(id);
     } catch (e) {
       const err = new Error(e.message);
       err.remaining = plan.slice(i).map((x) => x.text).join('\n');
       err.sentBubbles = i;
+      err.messageIds = messageIds.slice();
       throw err;
     }
   }
-  return plan.length;
+  return { bubbles: plan.length, messageIds };
 }
 
 let draining = false;
@@ -830,15 +862,29 @@ async function askDsh(info) {
   // 自动压缩后的摘要（⑤）要放在最前面：新会话没有前文，靠它接上。
   const ctxBlock = info.kind === 'group' ? groupCtx.buildBlock(info.groupId) : '';
   const summary = summaries[info.key] ? '[之前会话的摘要]\n' + summaries[info.key] + '\n\n' : '';
-  const prompt = summary + ctxBlock + info.text;
+  const prev = sessions[info.key] || '';
+  // 交互提示只给真 DSH 注入：echo 是自测后端，没有会话，拼进去只会污染已有回归测试的输出。
+  // 判断依据是「这个 DSH 会话是否已经拼过」；进程重启后 Set 清空，重注一次无害。
+  const hint = cfg.backend !== 'echo' && cfg.interactionsEnabled
+    ? interactionHint({ maxActions: cfg.interactionsMax, groupPoke: cfg.interactionsGroupPoke })
+    : '';
+  const needHint = !!hint && (!prev || !hintedSessions.has(prev));
+  const prompt = summary + ctxBlock + info.text + (needHint ? '\n\n' + hint : '');
+  /** 目的：标记某个会话已拼过提示；新区块要等 DSH 返回 sessionId 才知道。副作用：改内存 Set、写日志。 */
+  const markHint = (sessionId) => {
+    const id = sessionId || prev;
+    if (!needHint || !id || hintedSessions.has(id)) return;
+    hintedSessions.add(id);
+    log('info: 交互提示已注入', info.key, 'session=' + String(id).slice(0, 8));
+  };
   if (cfg.backend === 'echo') {
     const out = await runEcho(prompt);
     return { ...out, final: out.text, texts: [out.text], tools: [], thinking: [] };
   }
-  const prev = sessions[info.key] || '';
   try {
     const events = await runHeadless(prompt, prev, info.key);
     if (events.sessionId && events.sessionId !== prev) { sessions[info.key] = events.sessionId; saveSessions(); }
+    markHint(events.sessionId);
     return events;
   } catch (e) {
     // DSH 的会话文件被删/回滚后，--session-id 会报 unknown；保留映射会让该聊天以后每条都失败。
@@ -848,6 +894,7 @@ async function askDsh(info) {
     saveSessions();
     const events = await runHeadless(prompt, '', info.key);
     if (events.sessionId) { sessions[info.key] = events.sessionId; saveSessions(); }
+    markHint(events.sessionId);
     record('skip', info.key, 0, 'DSH 会话失效，已重开');
     return events;
   }
@@ -1188,10 +1235,26 @@ const server = http.createServer(async (req, res) => {
       // 输出档位（⑤）：同一轮事件，按当前聊天选的档位渲染成要发的文字
       const tier = tierOf(info.key);
       const rendered = renderByTier(events, tier).trim();
-      const reply = rendered || events.final || '（DSH 没有返回内容）';
+      const rawReply = rendered || events.final || '';
+      // 交互动作（P0-1）：先从正文里摘出动作，再发正文；关闭时标记原样保留。
+      // 先发正文、后执行动作，保证「动作慢/失败」不会挡在正文前面；撤回才需要等气泡都发完。
+      const parsed = cfg.interactionsEnabled
+        ? parseActions(rawReply, { maxActions: cfg.interactionsMax })
+        : { text: rawReply, actions: [], ignoredActions: [] };
+      if (parsed.ignoredActions.length) {
+        log('warn: 忽略多余动作', info.key, parsed.ignoredActions.map((a) => a.kind).join(','));
+      }
+      let reply = parsed.text;
+      const actionOnly = !reply && parsed.actions.length > 0;
+      // 纯动作回复不发空消息；只有「模型真没内容且没有动作」时才保留旧的兜底文案。
+      if (!reply && !actionOnly) reply = '（DSH 没有返回内容）';
+      let messageIds = [];
       try {
-        const bubbles = await deliverHuman(info, reply);
-        if (bubbles > 1) { counts.bubbles += bubbles; lastPlan = { bubbles, chars: reply.length, at: Date.now() }; }
+        if (reply) {
+          const sent = await deliverHuman(info, reply);
+          if (sent.bubbles > 1) { counts.bubbles += sent.bubbles; lastPlan = { bubbles: sent.bubbles, chars: reply.length, at: Date.now() }; }
+          messageIds = sent.messageIds || [];
+        }
       } catch (sendErr) {
         // DSH 已经算出了答案，只是发不出去：进补发队列，别把答案丢了，也别再发一条「出错了」。
         enqueueOutbox(info, sendErr.remaining || reply, sendErr);
@@ -1202,6 +1265,37 @@ const server = http.createServer(async (req, res) => {
         noteFailure('回发失败：' + sendErr.message);
         return;
       }
+
+      // 正文已送达（或本轮是纯动作）再执行动作；总时限/失败只记 warn，不影响上面的正文。
+      let act = { executed: 0, failed: 0, skipped: 0, errors: [] };
+      if (parsed.actions.length) {
+        try {
+          act = await runActions(parsed.actions, { info, messageIds }, {
+            api: cfg.napcatApi,
+            token: cfg.napcatToken,
+            groupPoke: cfg.interactionsGroupPoke,
+            maxActions: cfg.interactionsMax,
+            timeoutMs: cfg.interactionsTimeoutMs,
+          });
+        } catch (e) {
+          // runActions 约定不抛错；这里只是最后一道保险，别让动作把整轮打成失败。
+          act = { executed: 0, failed: parsed.actions.length, skipped: 0, errors: [{ kind: '?', message: String((e && e.message) || e) }] };
+        }
+        interactionTotals.turns++;
+        interactionTotals.executed += act.executed;
+        interactionTotals.failed += act.failed;
+        interactionTotals.skipped += act.skipped;
+        for (const err of act.errors) log('warn: 动作执行异常', err.kind, redactText(err.message));
+      }
+      // 面板的「本轮」要每轮刷新：这一轮没有动作时也显示 0 个，而不是停在上一轮的数字上。
+      lastInteractions = {
+        at: Date.now(),
+        executed: act.executed,
+        failed: act.failed,
+        skipped: act.skipped,
+        kinds: parsed.actions.map((a) => a.kind),
+      };
+
       const ms = Date.now() - started;
       counts.ok++;
       alertGate.recordSuccess();
@@ -1210,7 +1304,10 @@ const server = http.createServer(async (req, res) => {
       relay.ok();
       const st = chatStats.get(info.key) || { messages: 0 };
       chatStats.set(info.key, { messages: st.messages + 1, lastAt: Date.now(), lastMs: ms });
-      record('ok', info.key, ms, reply.length + ' 字');
+      const note = actionOnly
+        ? '纯动作 ' + act.executed + '/' + parsed.actions.length
+        : reply.length + ' 字' + (parsed.actions.length ? ' · 动作 ' + act.executed + '/' + parsed.actions.length : '');
+      record('ok', info.key, ms, note);
       log('ok', info.kind, info.key, `${ms}ms`, reply.length + '字');
     } catch (e) {
       const ms = Date.now() - started;

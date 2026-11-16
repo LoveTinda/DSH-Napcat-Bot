@@ -75,6 +75,12 @@ try {
   check('初始计数为 0', empty.counts.incoming === 0 && empty.counts.ok === 0);
   check('初始会话表为空', Array.isArray(empty.sessions) && empty.sessions.length === 0);
   check('配置里不出现真实 token', empty.config.NAPCAT_TOKEN === '(未设置)');
+  check('面板快照有交互动作配置', empty.config.BRIDGE_INTERACTIONS === 1 &&
+    empty.config.BRIDGE_INTERACTIONS_GROUP_POKE === 0 &&
+    empty.config.BRIDGE_INTERACTIONS_MAX === 2 &&
+    empty.config.BRIDGE_INTERACTIONS_TIMEOUT_MS === 2500, JSON.stringify(empty.config));
+  check('面板快照有交互动作统计', empty.interactions && empty.interactions.enabled === true &&
+    typeof empty.interactions.summary === 'string' && empty.interactions.summary.includes('开'), JSON.stringify(empty.interactions));
 
   const html = await (await fetch(base + '/panel/', { headers: { accept: 'text/html' } })).text();
   check('面板页可打开', html.includes('id="cards"') && html.includes('桥接器'));
@@ -82,6 +88,7 @@ try {
   check('面板不内联聊天内容', !html.includes('__secret_text__'));
   check('面板不再用横向滚动表格', !html.includes('<table'));
   check('面板有手动刷新与离线错误条', html.includes('id="refresh"') && html.includes('id="notice"'));
+  check('面板有「交互动作」一行', html.includes('交互动作'));
   check('根路径也返回面板 HTML', (await (await fetch(base + '/')).text()).includes('id="cards"'));
   check('/state.json 与 /panel/state.json 等价', (await (await fetch(base + '/state.json')).json()).ok === true);
   const head = await fetch(base + '/healthz', { method: 'HEAD' });

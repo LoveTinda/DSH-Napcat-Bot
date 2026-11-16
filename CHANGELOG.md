@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## v0.2.32
+- **P0-1 交互动作**：新增 `units/bridge/interactions.mjs`——模型在正文里写
+  `[[react:赞]]` / `[[recall]]` / `[[poke]]`，桥接器执行后把标记从可见正文里删掉
+- 表情回应：给用户那条消息调 `set_msg_emoji_like`（`emoji_id` 字符串）；中文名映射
+  赞=76、爱心=66、笑哭=182、鼓掌=99、疑问=32、捂脸=264，数字 ID 原样传
+- 撤回：`sendReply()` 改为返回 `data.message_id`，本轮每条气泡的 id 都收集；
+  `[[recall]]` 等正文发完后逐条 `delete_msg`（分条时也是逐条删）
+- 戳一戳：私聊 `friend_poke`、群 `group_poke`；群默认关，打开配置才发
+- **正文优先**：先发正文、再在总时限内执行动作；动作报错/超时只记
+  `warn: 动作执行异常`，正文照常送达；纯动作回复不发空消息
+- 解析：代码围栏（跨多行/未闭合）内不执行；每轮最多 N 个，多余的丢掉并记
+  `忽略多余动作`；删标记后不留双空行，段落缩进不动
+- 提示注入：每个 DSH 会话第一次拼 prompt 时注入一段短提示，内存 Set 按会话 id 记；
+  `BRIDGE_INTERACTIONS=0` 时既不解析也不注入
+- 配置：`BRIDGE_INTERACTIONS`、`BRIDGE_INTERACTIONS_GROUP_POKE`、
+  `BRIDGE_INTERACTIONS_MAX`、`BRIDGE_INTERACTIONS_TIMEOUT_MS`；面板加「交互动作」一行
+  （开关 + 最近一轮执行/失败数，不记正文）
+- 测试：`test-interactions.mjs` 49 项（纯解析/围栏/上限/映射/空白/提示）+
+  `test-interactions-wire.mjs` 33 项（假 NapCat + 假 DSH：正文无标记、撤回删对 id、
+  群 poke 默认关/开关后发、纯动作不发空消息、动作 API 报错正文照发、总关闭原样保留、
+  提示只注入一次、分条后逐条撤回）
+- 推断说明：旧 `src/interactions.js` 已丢失（0% 可恢复），本版按 `bridge.js` 的调用点、
+  任务书与 `docs/待恢复清单.md` 的证据重写；解析细节（未知动作原样保留、空参数不执行）
+  是本次定的规则，不是逐字复原
+
 ## v0.2.31
 - **补回「输入状态」（③ 的漏项）**：旧桥接器每轮私聊都会调 NapCat 的 `set_input_status`
   亮「正在输入…」，这次重建时整块丢了。新增 `units/bridge/typing.mjs`——

@@ -289,6 +289,11 @@ function renderOverview(s) {
   // 输入状态：私聊里那三个点。只显示开关与轮数，不含任何聊天内容。
   const ty = s.typing || {};
   row('输入状态', (ty.summary || '未知') + (ty.messages ? ' · 已亮 ' + ty.messages + ' 轮' : ''));
+
+  // 交互动作（P0-1）：开关 + 最近一轮执行/失败数；不显示表情名，更不显示正文。
+  const it = s.interactions || {};
+  const lastIt = it.last ? ' · 本轮 ' + it.last.executed + ' 个 / 失败 ' + it.last.failed : ' · 还没执行过';
+  row('交互动作', (it.summary || '未知') + lastIt, it.last && it.last.failed ? 'warn' : '');
 }
 
 function renderSessions(s) {
@@ -354,10 +359,14 @@ function renderConfig(s) {
   const groups = [
     ['连接', ['BRIDGE_LISTEN', 'NAPCAT_API', 'NAPCAT_TOKEN', 'BRIDGE_STATE_FILE']],
     ['行为', ['BRIDGE_BACKEND', 'BRIDGE_ALLOW_GROUP', 'BRIDGE_TIMEOUT_MS', 'BRIDGE_PERMISSION_MODE']],
+    ['交互动作', ['BRIDGE_INTERACTIONS', 'BRIDGE_INTERACTIONS_GROUP_POKE', 'BRIDGE_INTERACTIONS_MAX', 'BRIDGE_INTERACTIONS_TIMEOUT_MS']],
     ['DSH', ['DSH_BIN', 'DSH_HOME']],
     ['回发与告警', ['BRIDGE_MAX_EVENT_AGE_SEC', 'BRIDGE_SEEN_FILE', 'BRIDGE_SEND_RETRY', 'BRIDGE_SEND_DRAIN_MS', 'BRIDGE_OUTBOX_TTL_MS', 'BRIDGE_OUTBOX_FILE', 'ALERT_QQ', 'ALERT_FAIL_STREAK', 'ALERT_COOLDOWN_SEC', 'DISK_ALERT_PERCENT']],
-    ['其它', Object.keys(cfg).filter(function (k) { return !['BRIDGE_LISTEN', 'NAPCAT_API', 'NAPCAT_TOKEN', 'BRIDGE_STATE_FILE', 'BRIDGE_BACKEND', 'BRIDGE_ALLOW_GROUP', 'BRIDGE_TIMEOUT_MS', 'BRIDGE_PERMISSION_MODE', 'DSH_BIN', 'DSH_HOME', 'BRIDGE_MAX_EVENT_AGE_SEC', 'BRIDGE_SEEN_FILE', 'BRIDGE_SEND_RETRY', 'BRIDGE_SEND_DRAIN_MS', 'BRIDGE_OUTBOX_TTL_MS', 'BRIDGE_OUTBOX_FILE', 'ALERT_QQ', 'ALERT_FAIL_STREAK', 'ALERT_COOLDOWN_SEC', 'DISK_ALERT_PERCENT'].includes(k); })]
   ];
+  // 先收集上面已经分组的键，剩下的才进「其它」，避免新键在配置页出现两次。
+  const known = new Set();
+  for (const g of groups) for (const k of g[1]) known.add(k);
+  groups.push(['其它', Object.keys(cfg).filter(function (k) { return !known.has(k); })]);
   for (const g of groups) {
     if (!g[1].length) continue;
     const group = el('div', null, 'group');
