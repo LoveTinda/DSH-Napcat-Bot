@@ -21,14 +21,14 @@
 ```sh
 cd /root/workspace/tinda-bot
 sh bin/check-module.sh      # 结构门禁：module.prop / shebang / CRLF / service.sh
-sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.22-magisk.zip
+sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.23-magisk.zip
 ```
 
 包内只含运行需要的东西（`module.prop`、四个脚本、`bin/ units/ contracts/ etc/ docs/` 与根文档），
 不含 `.runtime/`、`.git`、`originals/`、`local/`。当前产物：
 
-- `tinda-bot-v0.2.22-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
-- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.22-magisk.zip.sha256`（在 zip 所在目录）
+- `tinda-bot-v0.2.23-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
+- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.23-magisk.zip.sha256`（在 zip 所在目录）
 - 同目录有 `.sha256`，刷之前核一下
 
 ## 2. 刷入
@@ -37,10 +37,10 @@ sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.22-magi
 
 ```sh
 # Magisk
-su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.22-magisk.zip'
+su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.23-magisk.zip'
 
 # KernelSU / SukiSU（同一个模块格式，目录也是 /data/adb/modules）
-su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.22-magisk.zip'
+su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.23-magisk.zip'
 ```
 
 也可以直接在 Magisk / KernelSU / SukiSU 的 App 里：**模块** → **从本地安装** → 选 zip → 重启。

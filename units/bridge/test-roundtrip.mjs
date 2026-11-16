@@ -81,6 +81,8 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     BRIDGE_SEND_RETRY: '3',
     BRIDGE_SEND_DRAIN_MS: '500', // 补发轮询加快，测试不用等 15 秒
     ALERT_QQ: '',
+    BRIDGE_MAX_EVENT_AGE_SEC: '120',
+    BRIDGE_SEEN_FILE: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -141,6 +143,44 @@ const bad = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/`, {
 check('坏 JSON 返回 400', bad.status === 400, String(bad.status));
 const alive = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/healthz`).then((r) => r.ok).catch(() => false);
 check('坏 JSON 后进程仍在线', alive);
+
+// 6.4) 控制命令：/reset 与 /session（只走私聊）
+const cmdMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20010,
+  message_id: 61, message: [{ type: 'text', data: { text: '/reset' } }],
+});
+const resetReply = await waitFor(() => sent.slice(cmdMark).find((s) => s.path === '/send_private_msg'));
+check('/reset 有回复', Boolean(resetReply) && String(resetReply.body.message).includes('已重置'),
+  JSON.stringify(resetReply && resetReply.body));
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20010,
+  message_id: 62, message: [{ type: 'text', data: { text: '/session' } }],
+});
+const sessReply = await waitFor(() => sent.slice(cmdMark).filter((s) => s.path === '/send_private_msg').length >= 2
+  ? sent.slice(cmdMark).filter((s) => s.path === '/send_private_msg')[1] : null);
+check('/session 有回复', Boolean(sessReply) && /会话/.test(String(sessReply.body.message)),
+  JSON.stringify(sessReply && sessReply.body));
+
+// 群里的 /reset 不生效（要当普通问题交给 DSH）
+const gMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'group', self_id: 10000, user_id: 20011, group_id: 30002,
+  message_id: 63, message: [{ type: 'text', data: { text: '/reset' } }],
+});
+const groupReply = await waitFor(() => sent.slice(gMark).find((s) => s.path === '/send_group_msg'));
+check('群里的 /reset 不当作控制命令', Boolean(groupReply) && !String(groupReply.body.message).includes('已重置'),
+  JSON.stringify(groupReply && groupReply.body));
+
+// 6.5) 重连补推的旧事件：带 10 分钟前的 time，必须被忽略
+const staleMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20009,
+  message_id: 51, time: Math.floor(Date.now() / 1000) - 600,
+  message: [{ type: 'text', data: { text: '十分钟前的旧消息' } }],
+});
+await wait(600);
+check('过期事件不触发回发', sent.length === staleMark, JSON.stringify(sent.slice(staleMark)));
 
 // 7) 回发失败自动重试（T-8）：前两次 500，第三次成功
 failPlan.set('20005', 2);

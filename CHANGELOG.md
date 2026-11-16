@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v0.2.23
+- **修「重启后答非所问」**：新增 `BRIDGE_MAX_EVENT_AGE_SEC`（默认 120 秒）——NapCat 断线重连会把
+  积压事件补推上来，以前会在重启后一串回答十几分钟前的消息，看着像乱答；现在超过 2 分钟的旧事件
+  直接记 skip、不回答
+- **去重跨重启**：已处理的 `message_id` 落盘到 `state/bridge/seen.json`（最近 500 条），
+  以前只在内存里，桥接器一重启就可能把同一条再答一遍
+- **自助恢复会话**：私聊发 `/reset` 清掉该聊天的 DSH 会话映射、`/session` 查当前 session id；
+  群聊不响应（避免任何人重置大家的会话）
+- **测试**：`test-roundtrip` 18 → 22（控制命令 3 项、过期事件 1 项）
+
 ## v0.2.22
 - **rootfs 复制模式**：`magisk-provision.sh --from` 默认用 tar 管道**复制**（新 inode，
   排除 `proc/dev/sys/sdcard/data`，保留符号链接与权限），`--link` 才用硬链接克隆。

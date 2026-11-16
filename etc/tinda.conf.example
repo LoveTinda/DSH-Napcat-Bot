@@ -28,6 +28,8 @@ BRIDGE_ALLOW_GROUP=1
 BRIDGE_TIMEOUT_MS=180000
 # 透传给 dsh headless --permission-mode；空 = 用 profile 默认
 BRIDGE_PERMISSION_MODE=
+# 重连补推的旧事件超过多少秒就不回答（0 = 不限制）；避免重启后回答十几分钟前的消息
+BRIDGE_MAX_EVENT_AGE_SEC=120
 # 回发失败时原地重试几次（1–10），仍失败就进补发队列
 BRIDGE_SEND_RETRY=3
 # 补发队列轮询间隔（毫秒，500–600000）

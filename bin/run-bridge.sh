@@ -25,6 +25,9 @@ export BRIDGE_PERMISSION_MODE="$(conf_get BRIDGE_PERMISSION_MODE "")"
 export BRIDGE_STATE_FILE="$DATA/state/bridge/sessions.json"
 # 补发队列（T-8）：回复发不出去时落盘，重启后继续补；过期由 BRIDGE_OUTBOX_TTL_MS 控制。
 export BRIDGE_OUTBOX_FILE="$DATA/state/bridge/outbox.json"
+# 去重窗口落盘（跨重启），以及重连补推旧事件的最大容忍时长（秒）。
+export BRIDGE_SEEN_FILE="$DATA/state/bridge/seen.json"
+export BRIDGE_MAX_EVENT_AGE_SEC="$(conf_get BRIDGE_MAX_EVENT_AGE_SEC 120)"
 export BRIDGE_SEND_RETRY="$(conf_get BRIDGE_SEND_RETRY 3)"
 export BRIDGE_SEND_DRAIN_MS="$(conf_get BRIDGE_SEND_DRAIN_MS 15000)"
 export BRIDGE_OUTBOX_TTL_MS="$(conf_get BRIDGE_OUTBOX_TTL_MS 21600000)"

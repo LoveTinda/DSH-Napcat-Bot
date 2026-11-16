@@ -93,6 +93,8 @@
     "BRIDGE_ALLOW_GROUP": true,
     "BRIDGE_TIMEOUT_MS": 180000,
     "BRIDGE_PERMISSION_MODE": "(profile 默认)",
+    "BRIDGE_MAX_EVENT_AGE_SEC": 120,
+    "BRIDGE_SEEN_FILE": "/root/workspace/tinda-bot/.runtime/state/bridge/seen.json",
     "BRIDGE_SEND_RETRY": 3,
     "BRIDGE_SEND_DRAIN_MS": 15000,
     "BRIDGE_OUTBOX_TTL_MS": 21600000,
@@ -175,7 +177,18 @@
 - 底部提示：改 `$DATA/etc/tinda.conf` 后 `bin/unit.sh restart bridge`。
 - **没有保存按钮**，这是安全边界，不是漏做。
 
-### 4.5 补发与告警（只读）
+### 4.5 控制命令（私聊）
+
+桥接器只认两个命令，其余文本一律当普通问题交给 DSH：
+
+| 命令 | 行为 | 为什么需要 |
+| --- | --- | --- |
+| `/reset` | 清掉这个聊天的 DSH 会话映射，下一条开新会话 | 会话续接错了（答非所问、上下文串了）时自己救，不用改 state 文件 |
+| `/session` | 回当前会话 id，没有就明说 | 核对映射是否指向你以为的那个会话 |
+
+只对**私聊**生效：群里发 `/reset` 会当普通问题处理，避免任何人一句话重置大家的会话。
+
+### 4.6 补发与告警（只读）
 
 - 概览的「待补发」= `counts.outbox`，来自 `$DATA/state/bridge/outbox.json`；
   断网时已生成的回复会留在这里，恢复后由桥接器自己补发，面板不提供「重发/删除」按钮。

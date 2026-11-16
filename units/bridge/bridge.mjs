@@ -36,6 +36,10 @@ const cfg = {
   drainMs: clampInt(process.env.BRIDGE_SEND_DRAIN_MS, 15000, 500, 600000),
   outboxTtlMs: clampInt(process.env.BRIDGE_OUTBOX_TTL_MS, 6 * 60 * 60 * 1000, 60000, 7 * 24 * 60 * 60 * 1000),
   outboxFile: process.env.BRIDGE_OUTBOX_FILE || '',
+  // 重连后 NapCat 会把断线期间的旧事件补推上来；不设上限就会出现「刚重启就回答十几分钟前的消息」，
+  // 看着像答非所问。0 = 不限制（不推荐）。
+  maxEventAgeSec: clampInt(process.env.BRIDGE_MAX_EVENT_AGE_SEC, 120, 0, 86400),
+  seenFile: process.env.BRIDGE_SEEN_FILE || '',
   // 告警（O-4）：空 ALERT_QQ = 关；阈值与冷却见 alerts.mjs 的常量说明。
   alertQq: String(process.env.ALERT_QQ || '').trim(),
   alertStreak: clampInt(process.env.ALERT_FAIL_STREAK, 3, 1, 100),
@@ -102,6 +106,8 @@ const events = [];               // 最近 100 条处理结果，只放元信息
 const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
 const seenIds = new Set();       // self_id:message_id，防 NapCat 重推导致同一条被回答两次
 const seenOrder = [];
+// 去重窗口要跨重启：否则 bridge 一重启，NapCat 补推的旧消息会被当成新消息再答一遍。
+const seenFile = cfg.seenFile || (cfg.outboxFile ? path.join(path.dirname(cfg.outboxFile), 'seen.json') : '');
 const outbox = [];               // 待补发回复：{ id, kind, userId, groupId, key, text, at, tries, lastError }
 const alertGate = createAlertGate({ failStreak: cfg.alertStreak, cooldownMs: cfg.alertCooldownMs });
 let lastDiskPercent = null;
@@ -160,6 +166,8 @@ function snapshot() {
       BRIDGE_ALLOW_GROUP: cfg.allowGroup,
       BRIDGE_TIMEOUT_MS: cfg.timeoutMs,
       BRIDGE_PERMISSION_MODE: cfg.permissionMode || '(profile 默认)',
+      BRIDGE_MAX_EVENT_AGE_SEC: cfg.maxEventAgeSec,
+      BRIDGE_SEEN_FILE: seenFile || '(不落盘)',
       BRIDGE_SEND_RETRY: cfg.sendRetry,
       BRIDGE_SEND_DRAIN_MS: cfg.drainMs,
       BRIDGE_OUTBOX_TTL_MS: cfg.outboxTtlMs,
@@ -231,6 +239,38 @@ function classifyEvent(ev) {
 }
 
 /**
+ * 目的：把去重窗口落盘，重启后仍然认得「这条已经答过」。
+ * 输入：无；输出：无。失败：写失败只 warn（下次重启可能多答一条，不影响当前）。
+ * 副作用：写 seenFile（0600，最多 500 条）。
+ */
+function saveSeen() {
+  if (!seenFile) return;
+  try {
+    fs.mkdirSync(path.dirname(seenFile), { recursive: true });
+    const tmp = seenFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(seenOrder), { mode: 0o600 });
+    fs.renameSync(tmp, seenFile);
+  } catch (e) { log('warn: 去重窗口写入失败', redactText(e.message)); }
+}
+
+/** 目的：启动时恢复去重窗口；文件不存在/坏掉就当空的。副作用：只读文件。 */
+function loadSeen() {
+  if (!seenFile) return;
+  try {
+    const raw = JSON.parse(fs.readFileSync(seenFile, 'utf8'));
+    if (!Array.isArray(raw)) return;
+    for (const key of raw) {
+      if (typeof key !== 'string' || !key || seenIds.has(key)) continue;
+      seenIds.add(key);
+      seenOrder.push(key);
+    }
+    if (seenOrder.length) log('info: 载入去重窗口', seenOrder.length, '条');
+  } catch (e) {
+    if (e.code !== 'ENOENT') log('warn: 去重窗口读取失败', redactText(e.message));
+  }
+}
+
+/**
  * 目的：识别 NapCat 重推的同一条消息（同一个 self_id + message_id），避免重复回答。
  * 输入：原始 OneBot 事件；message_id 缺失时一律当作不重复。
  * 输出：true = 本进程已经处理过这个 id。
@@ -244,6 +284,7 @@ function isDuplicateEvent(ev) {
   seenIds.add(key);
   seenOrder.push(key);
   if (seenOrder.length > MAX_SEEN_IDS) seenIds.delete(seenOrder.shift());
+  saveSeen();
   return false;
 }
 
@@ -595,6 +636,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const info = classified.info;
+  // 重连补推的旧事件：跳过，不回答。时间戳是秒；缺字段时按「新消息」处理，避免误杀。
+  const evTime = Number(ev && ev.time);
+  if (cfg.maxEventAgeSec > 0 && Number.isFinite(evTime) && evTime > 0) {
+    const age = Math.floor(Date.now() / 1000) - evTime;
+    if (age > cfg.maxEventAgeSec) {
+      counts.skipped++;
+      record('skip', info.key, 0, '过期事件（' + age + ' 秒前，重连补推），已忽略');
+      log('skip', info.kind, info.key, '过期事件', age + 's');
+      return;
+    }
+  }
   // NapCat 在超时/重连时会重推同一个 message_id；不拦会导致同一个问题回答两次。
   if (isDuplicateEvent(ev)) {
     counts.skipped++;
@@ -605,6 +657,23 @@ const server = http.createServer(async (req, res) => {
   enqueue(info.key, async () => {
     const started = Date.now();
     try {
+      // 两个最小的控制命令：会话乱了能自己救，不用去翻 state 文件。只对私聊开放，
+      // 避免群里任何人一句话就把大家的会话重置掉。
+      const cmd = info.text.trim().toLowerCase();
+      if (info.kind === 'private' && (cmd === '/reset' || cmd === '/session')) {
+        if (cmd === '/reset') {
+          delete sessions[info.key];
+          saveSessions();
+          await deliver(info, '已重置这个聊天的 DSH 会话，下一条消息会开新会话');
+          record('ok', info.key, Date.now() - started, '手动重置会话');
+        } else {
+          const sid = sessions[info.key] || '';
+          await deliver(info, sid ? '当前会话：' + sid : '还没有建立 DSH 会话（下一条消息会新建）');
+          record('ok', info.key, Date.now() - started, '查询会话');
+        }
+        alertGate.recordSuccess();
+        return;
+      }
       const { text } = await askDsh(info);
       const reply = (text || '').trim() || '（DSH 没有返回内容）';
       try {
@@ -646,6 +715,7 @@ server.on('error', (e) => {
 });
 // 补发：启动时先恢复上次的队列并试一轮，之后按 BRIDGE_SEND_DRAIN_MS 轮询。
 loadOutbox();
+loadSeen();
 // 面板/doctor 一打开就该看到磁盘占用，别等 5 分钟后的第一次定时检查。
 lastDiskPercent = diskUsedPercent(dataDir);
 setTimeout(() => { drainOutbox().catch((e) => log('warn: 补发轮询异常', redactText(e.message))); }, 1000).unref();

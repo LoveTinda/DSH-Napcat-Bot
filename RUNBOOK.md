@@ -269,6 +269,7 @@ git clone /sdcard/backup/tinda-bot-<版本>-<时间>/repo.bundle ~/tinda-restore
 | 桥接器收到不回复 | `logs bridge` | DSH 报 `MISSING_CREDENTIAL` / `ACCOUNT_SIGN_IN_REQUIRED`，查配置说明 §8 的 patch |
 | 回复发不出去 | `3001/get_status` | `httpServers` 没开，或 `secrets/napcat.token` 和 NapCat 里写的不一致 |
 | 回复晚了 / 事后才到 | 面板概览的「待补发」 | 3001 抖过：桥接器已把回复放进 `state/bridge/outbox.json`，恢复后按 `BRIDGE_SEND_DRAIN_MS` 补发；看事件里的「补发成功」 |
+| 机器人答非所问 / 上下文串了 | 面板「会话」页看 sessionId；私聊发 `/session` | 会话续接错了或重启后补推旧消息；先发 `/reset` 重开，再看 `state/bridge/seen.json` 有没有在增长 |
 | 一个问题收到两条回答 | 面板事件的「重复推送」 | NapCat 超时重推；同 `message_id` 已被去重。仍重复说明事件里没有 `message_id`，查 NapCat 的 `messagePostFormat` |
 | 手机没收到告警 | `grep ^ALERT_QQ .runtime/etc/tinda.conf` | 空 = 关；或同类告警还在 `ALERT_COOLDOWN_SEC` 冷却窗口里（面板「告警接收」会显示被压次数） |
 | 刷了模块但服务没起 | `su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'` | 日志里有「形态 / rootfs / node / 每个单元结果」；缺 node 或 rootfs 会明说。再跑 `unit.sh explain <单元>` 看走 exec 还是 chroot |
