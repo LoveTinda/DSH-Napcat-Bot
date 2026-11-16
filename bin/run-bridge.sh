@@ -23,6 +23,8 @@ export BRIDGE_ALLOW_GROUP="$(conf_get BRIDGE_ALLOW_GROUP 1)"
 export BRIDGE_TIMEOUT_MS="$(conf_get BRIDGE_TIMEOUT_MS 180000)"
 export BRIDGE_PERMISSION_MODE="$(conf_get BRIDGE_PERMISSION_MODE "")"
 export BRIDGE_STATE_FILE="$DATA/state/bridge/sessions.json"
+# 回复策略（①）：文件不存在就用默认策略（开放但标"未加固"），面板会显示来源。
+export BRIDGE_POLICY_FILE="$(conf_get BRIDGE_POLICY_FILE "$DATA/etc/bridge-policy.json")"
 # 补发队列（T-8）：回复发不出去时落盘，重启后继续补；过期由 BRIDGE_OUTBOX_TTL_MS 控制。
 export BRIDGE_OUTBOX_FILE="$DATA/state/bridge/outbox.json"
 # 去重窗口落盘（跨重启），以及重连补推旧事件的最大容忍时长（秒）。

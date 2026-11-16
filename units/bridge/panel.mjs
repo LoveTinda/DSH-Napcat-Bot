@@ -233,6 +233,7 @@ function renderOverview(s) {
     metric('成功回复', String(c.ok || 0)),
     metric('失败', String(c.failed || 0), { warn: (c.failed || 0) > 0 }),
     metric('跳过', String(c.skipped || 0)),
+    metric('策略拒绝', String(c.denied || 0), { warn: (c.denied || 0) > 0 }),
     metric('排队中', String(c.busy || 0), { warn: (c.busy || 0) > 0 }),
     metric('待补发', String(c.outbox || 0), { warn: (c.outbox || 0) > 0 }),
     metric('运行时长', fmtUptime(s.uptimeMs), { small: true })
@@ -254,6 +255,14 @@ function renderOverview(s) {
   row('补发队列', String(c.outbox || 0) + ' 条' + (al.suppressed ? '（告警已压 ' + al.suppressed + ' 次）' : ''));
   row('告警接收', al.qq ? al.qq + (al.sent ? ' · 已发 ' + al.sent + ' 条，最近 ' + fmtAgo(al.lastAt) : ' · 还没发过') : '未设置（ALERT_QQ）');
   row('磁盘占用', al.diskPercent == null ? '未知' : al.diskPercent + '%（阈值 ' + (al.diskAlertPercent == null ? 90 : al.diskAlertPercent) + '%）');
+  // 回复策略（①）：摘要里只有数量没有号码；未加固要显眼，否则「谁都能用」会一直被忽略。
+  const pol = s.policy || {};
+  const denied = pol.denied && typeof pol.denied === 'object' ? Object.entries(pol.denied) : [];
+  const top = denied.sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => k + '×' + v).join(' · ');
+  row('回复策略', (pol.summary || '未知') + (pol.hardened ? '' : ' · 未加固'), pol.hardened ? '' : 'warn');
+  row('策略来源', pol.source || '-');
+  if (top) row('被拒原因', top);
+  if (pol.errors && pol.errors.length) row('策略错误', pol.errors.join(' / '), 'warn');
 }
 
 function renderSessions(s) {

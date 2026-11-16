@@ -18,6 +18,10 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { renderPanel } from './panel.mjs';
 import { createAlertGate, diskUsedPercent, maskQq } from './alerts.mjs';
+import {
+  DEFAULT_POLICY, normalizePolicy, validatePolicy, decidePolicy,
+  commandRole, describePolicy, explainWhy, maskChatKey,
+} from './policy.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -45,6 +49,8 @@ const cfg = {
   alertStreak: clampInt(process.env.ALERT_FAIL_STREAK, 3, 1, 100),
   alertCooldownMs: clampInt(process.env.ALERT_COOLDOWN_SEC, 1800, 60, 86400) * 1000,
   diskAlertPercent: clampInt(process.env.DISK_ALERT_PERCENT, 90, 50, 99),
+  // 回复策略（①）：谁能触发、群里要不要 @。文件不存在就用 DEFAULT_POLICY（开放但标"未加固"）。
+  policyFile: process.env.BRIDGE_POLICY_FILE || '',
 };
 
 /**
@@ -101,7 +107,7 @@ function redactText(value) {
 
 // ---------- 面板用的统计 ----------
 const startedAt = Date.now();
-const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0 };
+const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied: 0 };
 const events = [];               // 最近 100 条处理结果，只放元信息，不放聊天内容
 const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
 const seenIds = new Set();       // self_id:message_id，防 NapCat 重推导致同一条被回答两次
@@ -110,6 +116,40 @@ const seenOrder = [];
 const seenFile = cfg.seenFile || (cfg.outboxFile ? path.join(path.dirname(cfg.outboxFile), 'seen.json') : '');
 const outbox = [];               // 待补发回复：{ id, kind, userId, groupId, key, text, at, tries, lastError }
 const alertGate = createAlertGate({ failStreak: cfg.alertStreak, cooldownMs: cfg.alertCooldownMs });
+
+// ---------- 回复策略 ----------
+/**
+ * 目的：读策略文件并校验；文件缺失/坏掉就用默认策略，并明确标出「未加固」。
+ * 输入：无（读 cfg.policyFile）。
+ * 输出：{ policy, errors, warnings, source }；errors 非空不阻止启动——桥接器是前台业务，
+ *       为了一个配置笔误整机不干活更糟；错误会进日志、面板和 doctor。
+ * 失败：读/解析失败只 warn。副作用：无。
+ */
+function loadPolicy() {
+  if (!cfg.policyFile) return { policy: normalizePolicy(DEFAULT_POLICY), errors: [], warnings: ['没有 policyFile，用默认策略（未加固）'], source: '(默认)' };
+  // 文件不存在是常态（还没配过策略），不是错误：用默认策略 + 一条 warn 就够。
+  if (!fs.existsSync(cfg.policyFile)) {
+    return {
+      policy: normalizePolicy(DEFAULT_POLICY),
+      errors: [],
+      warnings: ['没有策略文件（' + cfg.policyFile + '），用默认策略：私聊全接、群必须 @，未加固'],
+      source: '(默认)',
+    };
+  }
+  let raw = null;
+  try { raw = JSON.parse(fs.readFileSync(cfg.policyFile, 'utf8')); }
+  catch (e) {
+    return { policy: normalizePolicy(DEFAULT_POLICY), errors: ['策略文件读不了：' + redactText(e.message)], warnings: [], source: cfg.policyFile };
+  }
+  const checked = validatePolicy({ ...raw, hardened: true });
+  return { ...checked, source: cfg.policyFile };
+}
+const policyState = loadPolicy();
+const policy = policyState.policy;
+const policyDenied = Object.create(null);   // why → 次数，面板用
+for (const line of policyState.warnings) log('warn: 策略', line);
+for (const line of policyState.errors) log('error: 策略', line);
+log('策略：' + describePolicy(policy) + ' ← ' + policyState.source);
 let lastDiskPercent = null;
 // 告警/补发都要写盘，目录从 stateFile 推；两个都为空（自测）时不落盘。
 const dataDir = cfg.outboxFile
@@ -158,6 +198,15 @@ function snapshot() {
       diskPercent: lastDiskPercent,
       diskAlertPercent: cfg.diskAlertPercent,
     },
+    policy: {
+      summary: describePolicy(policy),
+      source: policyState.source,
+      hardened: policy.hardened,
+      errors: policyState.errors,
+      warnings: policyState.warnings,
+      denied: { ...policyDenied },
+      deniedTotal: counts.denied,
+    },
     sessions: sessionsView,
     events: events.slice(0, MAX_EVENTS),
     config: {
@@ -176,6 +225,7 @@ function snapshot() {
       ALERT_FAIL_STREAK: cfg.alertStreak,
       ALERT_COOLDOWN_SEC: Math.round(cfg.alertCooldownMs / 1000),
       DISK_ALERT_PERCENT: cfg.diskAlertPercent,
+      BRIDGE_POLICY_FILE: cfg.policyFile || '(未设置，用默认策略)',
       NAPCAT_API: cfg.napcatApi,
       NAPCAT_TOKEN: cfg.napcatToken ? '(已设置)' : '(未设置)',
       DSH_BIN: cfg.dshBin,
@@ -201,19 +251,30 @@ function saveSessions() {
 }
 
 // ---------- OneBot 消息解析 ----------
-function textOf(message) {
-  if (typeof message === 'string') return message;
-  if (!Array.isArray(message)) return '';
+/**
+ * 目的：把 OneBot 消息段拼成纯文本，并识别「有没有 @ 我」。
+ * 输入：message（字符串或段数组）、selfId（机器人自己的 QQ 号）。
+ * 输出：{ text, mentioned }；@ 自己的段从正文里去掉（否则会变成「@12345 你好」这种噪声）。
+ * 失败：不抛错；结构不认识就当空消息。副作用：无。
+ */
+function textOf(message, selfId = '') {
+  if (typeof message === 'string') return { text: message.trim(), mentioned: false };
+  if (!Array.isArray(message)) return { text: '', mentioned: false };
   const out = [];
+  let mentioned = false;
   for (const seg of message) {
     if (!seg || typeof seg !== 'object') continue;
     if (seg.type === 'text' && seg.data && typeof seg.data.text === 'string') out.push(seg.data.text);
     else if (seg.type === 'image') out.push('[图片]');
     else if (seg.type === 'record') out.push('[语音]');
     else if (seg.type === 'file') out.push('[文件]');
-    else if (seg.type === 'at' && seg.data && seg.data.qq) out.push('@' + seg.data.qq);
+    else if (seg.type === 'at' && seg.data && seg.data.qq) {
+      const qq = String(seg.data.qq);
+      if (selfId && qq === String(selfId)) mentioned = true;      // @ 我：只记标志，不进正文
+      else out.push('@' + qq);
+    }
   }
-  return out.join('').trim();
+  return { text: out.join('').trim(), mentioned };
 }
 
 /**
@@ -232,10 +293,12 @@ function classifyEvent(ev) {
   const selfId = String(ev.self_id ?? '');
   const senderId = String(ev.user_id ?? '');
   if (selfId && senderId === selfId) return { skip: '自己发的消息' };
-  const text = textOf(ev.message);
-  if (!text) return { skip: '空消息或不支持的消息类型' };
+  const { text, mentioned } = textOf(ev.message, selfId);
+  // 群里只 @ 一下、不带正文时，@ 段被剔除后正文是空的；这种消息要留着，
+  // 交给策略判定（mention 模式本来就要求 @），否则用户 @ 了却没反应。
+  if (!text && !mentioned) return { skip: '空消息或不支持的消息类型' };
   const key = kind === 'group' ? `group:${ev.group_id}` : `private:${senderId}`;
-  return { info: { kind, key, text, userId: senderId, groupId: ev.group_id, messageId: ev.message_id } };
+  return { info: { kind, key, text: text || '(只是 @ 了我，没有正文)', userId: senderId, groupId: ev.group_id, messageId: ev.message_id, mentioned, selfId } };
 }
 
 /**
@@ -653,6 +716,22 @@ const server = http.createServer(async (req, res) => {
     record('skip', info.key, 0, '重复推送（同一 message_id），已忽略');
     return;
   }
+  // 回复策略（①）：白名单 / 群里必须 @ / 自己发的。拒绝只记元信息，不回任何内容。
+  const verdict = decidePolicy(policy, {
+    isGroup: info.kind === 'group',
+    userId: info.userId,
+    groupId: info.groupId,
+    mentioned: info.mentioned,
+    selfId: info.selfId,
+  });
+  if (!verdict.ok) {
+    counts.denied++;
+    policyDenied[verdict.why] = (policyDenied[verdict.why] || 0) + 1;
+    record('skip', info.key, 0, '策略拒绝：' + explainWhy(verdict.why));
+    if (verdict.why !== 'self') log('deny', info.kind, info.key, explainWhy(verdict.why));
+    return;
+  }
+
   counts.incoming++;
   enqueue(info.key, async () => {
     const started = Date.now();

@@ -193,6 +193,23 @@ fetch(process.argv[1]+"/panel/state.json",{signal:AbortSignal.timeout(4000)})
  .catch(e=>console.log("bad "+e.message))' "http://127.0.0.1:$BRIDGE_PORT" 2>/dev/null)
 case "$OUT" in ok*) ok "$OUT";; *) bad "$OUT";; esac
 
+# 回复策略（①）：能连上就必须能看到策略摘要；未加固要显眼，因为「谁都能用」是最容易被忽略的状态。
+POL=$("$NODE" -e '
+fetch(process.argv[1]+"/panel/state.json",{signal:AbortSignal.timeout(4000)})
+ .then(async r=>{const j=await r.json();const p=j.policy||{};console.log(JSON.stringify({hardened:!!p.hardened,summary:p.summary||"",source:p.source||"",errors:p.errors||[],denied:p.deniedTotal||0}));})
+ .catch(()=>console.log("null"))' "http://127.0.0.1:$BRIDGE_PORT" 2>/dev/null)
+echo "== 回复策略"
+if [ "$POL" = "null" ] || [ -z "$POL" ]; then
+  warn "读不到策略状态（桥接器没起或版本太旧）"
+else
+  PH=$(echo "$POL" | sed -n 's/.*"hardened":\(true\|false\).*/\1/p')
+  PS=$(echo "$POL" | sed -n 's/.*"summary":"\([^"]*\)".*/\1/p')
+  PSRC=$(echo "$POL" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p')
+  PD=$(echo "$POL" | sed -n 's/.*"denied":\([0-9]*\).*/\1/p')
+  if [ "$PH" = "true" ]; then ok "$PS（来源 $PSRC）"; else warn "$PS（来源 $PSRC）—— 未加固：谁都能触发"; fi
+  [ "${PD:-0}" -gt 0 ] && ok "已按策略拒绝 ${PD} 条" || true
+fi
+
 echo "== 网关"
 W=$(cat "$DATA/secrets/web.token" 2>/dev/null)
 if [ -n "$W" ]; then

@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.2.24
+- **回复策略（①/⑤ 的第一项）**：新增 `units/bridge/policy.mjs`，移植自旧桥接器完整救回的
+  `src/policy.js`（白名单、群必须 @、owner/admin 分级、空白名单即拒绝、危险默认拒绝启动）
+- 接入事件入口：自己 → 用户白名单 → 群白名单/模式 → 是否 @，被拒只记元信息不回消息
+- 群里「只 @ 不写字」不再被当成空消息丢掉（会交给策略判定，避免 @ 了没反应）
+- 面板新增「回复策略 / 策略来源 / 被拒原因」与「策略拒绝」计数；`doctor.sh` 加一段策略检查，
+  未加固会 warn（谁都能触发）
+- 配置：`BRIDGE_POLICY_FILE`（缺省 `$DATA/etc/bridge-policy.json`），模板 `etc/bridge-policy.example.json`；
+  文件不存在用默认策略（私聊全接 + 群必须 @，标未加固），不阻断启动
+- 自测：`test-policy.mjs` 24 项（纯函数）+ `test-policy-wire.mjs` 18 项（真起桥接器走一遍）
+
 ## v0.2.23
 - **修「重启后答非所问」**：新增 `BRIDGE_MAX_EVENT_AGE_SEC`（默认 120 秒）——NapCat 断线重连会把
   积压事件补推上来，以前会在重启后一串回答十几分钟前的消息，看着像乱答；现在超过 2 分钟的旧事件

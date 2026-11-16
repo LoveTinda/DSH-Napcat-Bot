@@ -7,6 +7,8 @@
 // 副作用：占用本机 16700/13001 端口，结束后全部关闭。
 
 import http from 'node:http';
+import fs from 'node:fs';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -67,6 +69,13 @@ async function waitFor(pred, ms = 8000) {
   return null;
 }
 
+// 策略文件：自测要覆盖「私聊放行 + 群必须 @」这条真实默认，所以显式给一份。
+const policyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tinda-policy-'));
+const policyFile = path.join(policyDir, 'policy.json');
+fs.writeFileSync(policyFile, JSON.stringify({
+  privateChat: 'allow', allowAllUsers: true, groupChat: 'mention', allowAllGroups: true,
+}));
+
 await new Promise((r) => mock.listen(NAPCAT_PORT, '127.0.0.1', r));
 
 const bridge = spawn(process.execPath, [BRIDGE], {
@@ -83,6 +92,7 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     ALERT_QQ: '',
     BRIDGE_MAX_EVENT_AGE_SEC: '120',
     BRIDGE_SEEN_FILE: '',
+    BRIDGE_POLICY_FILE: policyFile,
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -109,7 +119,8 @@ check('回发 user_id 正确', Boolean(priv && String(priv.body.user_id) === '20
 const before = sent.length;
 await post({
   post_type: 'message', message_type: 'group', self_id: 10000, user_id: 20002, group_id: 30001,
-  message_id: 12, message: [{ type: 'text', data: { text: '群里好' } }],
+  message_id: 12,
+  message: [{ type: 'at', data: { qq: '10000' } }, { type: 'text', data: { text: '群里好' } }],
 });
 const grp = await waitFor(() => sent.slice(before).find((s) => s.path === '/send_group_msg'));
 check('群聊事件触发 send_group_msg', Boolean(grp), JSON.stringify(sent.slice(before)));
@@ -166,7 +177,8 @@ check('/session 有回复', Boolean(sessReply) && /会话/.test(String(sessReply
 const gMark = sent.length;
 await post({
   post_type: 'message', message_type: 'group', self_id: 10000, user_id: 20011, group_id: 30002,
-  message_id: 63, message: [{ type: 'text', data: { text: '/reset' } }],
+  message_id: 63,
+  message: [{ type: 'at', data: { qq: '10000' } }, { type: 'text', data: { text: '/reset' } }],
 });
 const groupReply = await waitFor(() => sent.slice(gMark).find((s) => s.path === '/send_group_msg'));
 check('群里的 /reset 不当作控制命令', Boolean(groupReply) && !String(groupReply.body.message).includes('已重置'),

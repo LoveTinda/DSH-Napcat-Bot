@@ -37,6 +37,10 @@ BRIDGE_SEND_DRAIN_MS=15000
 # 补发队列里一条回复最多留多久（毫秒，默认 6 小时；过期丢弃，避免断网一天后刷屏）
 BRIDGE_OUTBOX_TTL_MS=21600000
 
+# 回复策略文件（①）：JSON，模板见 etc/bridge-policy.example.json。
+# 留空/文件不存在 = 默认策略（私聊全接、群必须 @），面板会标「未加固」。
+BRIDGE_POLICY_FILE=
+
 # ---- 告警（O-4）----
 # 告警接收的 QQ 号；留空 = 关（连续失败/磁盘告警都不发）
 ALERT_QQ=
