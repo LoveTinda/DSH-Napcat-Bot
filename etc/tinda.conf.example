@@ -41,6 +41,16 @@ BRIDGE_OUTBOX_TTL_MS=21600000
 # 留空/文件不存在 = 默认策略（私聊全接、群必须 @），面板会标「未加固」。
 BRIDGE_POLICY_FILE=
 
+# ---- 拟人化投递（③）----
+# 一条回复拆成几条发、条间停顿多久。0 = 关掉，整条一次发完。
+BRIDGE_HUMANIZE=1
+# 最多几条：超过就把剩下的并进最后一条（刷屏比长一条更烦）
+BRIDGE_HUMANIZE_MAX_BUBBLES=3
+# 单条字数上限（40–2000）
+BRIDGE_HUMANIZE_MAX_CHARS=240
+# 整轮条间停顿总和上限（毫秒，0–60000）：等太久像挂了
+BRIDGE_HUMANIZE_TOTAL_DELAY_MS=4000
+
 # ---- 告警（O-4）----
 # 告警接收的 QQ 号；留空 = 关（连续失败/磁盘告警都不发）
 ALERT_QQ=

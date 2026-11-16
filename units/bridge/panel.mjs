@@ -235,6 +235,7 @@ function renderOverview(s) {
     metric('跳过', String(c.skipped || 0)),
     metric('策略拒绝', String(c.denied || 0), { warn: (c.denied || 0) > 0 }),
     metric('命令', String((s.commands && s.commands.total) || 0)),
+    metric('分条', String((s.humanize && s.humanize.bubbles) || 0)),
     metric('排队中', String(c.busy || 0), { warn: (c.busy || 0) > 0 }),
     metric('待补发', String(c.outbox || 0), { warn: (c.outbox || 0) > 0 }),
     metric('运行时长', fmtUptime(s.uptimeMs), { small: true })
@@ -267,6 +268,10 @@ function renderOverview(s) {
   // 命令（②）：只显示命令名和次数，不显示谁发的。
   const cmdTop = s.commands && Array.isArray(s.commands.top) ? s.commands.top : [];
   if (cmdTop.length) row('常用命令', cmdTop.slice(0, 5).map((x) => '/' + x.name + '×' + x.hits).join(' · '));
+  // 拟人化投递（③）：一句话说明当前节奏，外加最近一次分了几条。
+  const hu = s.humanize || {};
+  const lastHu = hu.last ? ' · 最近 ' + hu.last.bubbles + ' 条 / ' + hu.last.chars + ' 字' : '';
+  row('拟人化投递', (hu.summary || '未知') + lastHu);
 }
 
 function renderSessions(s) {

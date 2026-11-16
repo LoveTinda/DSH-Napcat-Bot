@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v0.2.26
+- **拟人化投递（③）**：新增 `units/bridge/humanize.mjs`——按标点断句、每条 ≤240 字、最多 3 条，
+  条间按「字数 × 25ms」估打字时间（夹 350–1800ms、±25% 抖动），总等待封顶 4s
+- 代码围栏整块不拆；超过条数上限时剩下的并进最后一条（刷屏比一条长更烦）
+- 只有模型回复分条，命令回执仍是一条（`/help` 那种表格拆开就看不懂）
+- 发到一半失败：已发的算数，剩下的进补发队列，不重发前面的
+- 配置 `BRIDGE_HUMANIZE` / `_MAX_BUBBLES` / `_MAX_CHARS` / `_TOTAL_DELAY_MS`；面板显示节奏与最近分条
+- 自测 `test-humanize.mjs` 16 项（纯计划）+ `test-humanize-wire.mjs` 10 项（真起桥接器数分段）
+
 ## v0.2.25
 - **命令表（②）**：新增 `units/bridge/commands.mjs`，按旧机器人 `/help` 原文重建 23 条命令与别名
   （`/help /status /ping /new /stop /sessions /session /policy /notice` 已实现；

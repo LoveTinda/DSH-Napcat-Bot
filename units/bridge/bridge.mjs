@@ -25,6 +25,7 @@ import {
 import {
   parseCommand, helpText, helpFor, unknownCommandText, pendingCommandText,
 } from './commands.mjs';
+import { planDelivery, describeHumanize, DEFAULT_HUMANIZE } from './humanize.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -54,6 +55,11 @@ const cfg = {
   diskAlertPercent: clampInt(process.env.DISK_ALERT_PERCENT, 90, 50, 99),
   // 回复策略（①）：谁能触发、群里要不要 @。文件不存在就用 DEFAULT_POLICY（开放但标"未加固"）。
   policyFile: process.env.BRIDGE_POLICY_FILE || '',
+  // 拟人化投递（③）：分条与停顿。0 = 一条发完（回到最朴素的行为）。
+  humanizeEnabled: process.env.BRIDGE_HUMANIZE !== '0',
+  humanizeMaxBubbles: clampInt(process.env.BRIDGE_HUMANIZE_MAX_BUBBLES, DEFAULT_HUMANIZE.maxBubbles, 1, 10),
+  humanizeMaxChars: clampInt(process.env.BRIDGE_HUMANIZE_MAX_CHARS, DEFAULT_HUMANIZE.maxChars, 40, 2000),
+  humanizeTotalDelayMs: clampInt(process.env.BRIDGE_HUMANIZE_TOTAL_DELAY_MS, DEFAULT_HUMANIZE.totalDelayCapMs, 0, 60000),
 };
 
 /**
@@ -110,7 +116,8 @@ function redactText(value) {
 
 // ---------- 面板用的统计 ----------
 const startedAt = Date.now();
-const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied: 0 };
+const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied: 0, bubbles: 0 };
+let lastPlan = null;   // 最近一次分条投递：{ bubbles, chars, at }
 const events = [];               // 最近 100 条处理结果，只放元信息，不放聊天内容
 const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
 const seenIds = new Set();       // self_id:message_id，防 NapCat 重推导致同一条被回答两次
@@ -213,6 +220,16 @@ function snapshot() {
       denied: { ...policyDenied },
       deniedTotal: counts.denied,
     },
+    humanize: {
+      summary: describeHumanize({
+        enabled: cfg.humanizeEnabled,
+        maxBubbles: cfg.humanizeMaxBubbles,
+        maxChars: cfg.humanizeMaxChars,
+        totalDelayCapMs: cfg.humanizeTotalDelayMs,
+      }),
+      last: lastPlan,
+      bubbles: counts.bubbles,
+    },
     commands: {
       total: Object.values(cmdHits).reduce((a, b) => a + b, 0),
       top: Object.entries(cmdHits).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => ({ name: k, hits: v })),
@@ -236,6 +253,10 @@ function snapshot() {
       ALERT_COOLDOWN_SEC: Math.round(cfg.alertCooldownMs / 1000),
       DISK_ALERT_PERCENT: cfg.diskAlertPercent,
       BRIDGE_POLICY_FILE: cfg.policyFile || '(未设置，用默认策略)',
+      BRIDGE_HUMANIZE: cfg.humanizeEnabled ? 1 : 0,
+      BRIDGE_HUMANIZE_MAX_BUBBLES: cfg.humanizeMaxBubbles,
+      BRIDGE_HUMANIZE_MAX_CHARS: cfg.humanizeMaxChars,
+      BRIDGE_HUMANIZE_TOTAL_DELAY_MS: cfg.humanizeTotalDelayMs,
       NAPCAT_API: cfg.napcatApi,
       NAPCAT_TOKEN: cfg.napcatToken ? '(已设置)' : '(未设置)',
       DSH_BIN: cfg.dshBin,
@@ -479,6 +500,36 @@ async function deliver(info, text) {
     }
   }
   throw last;
+}
+
+/**
+ * 目的：按拟人化计划把一条回复拆成几段发出去（段间停顿）。
+ * 输入：info 路由、text 原文；计划参数来自 cfg.humanize*。
+ * 输出：成功时返回实际发出的段数；失败抛错，错误里带已发出的段数（remaining）。
+ * 失败：任一段重试用尽即抛，由调用方把剩下的进补发队列。
+ * 副作用：发网络请求、sleep。
+ */
+async function deliverHuman(info, text) {
+  const opts = {
+    enabled: cfg.humanizeEnabled,
+    maxBubbles: cfg.humanizeMaxBubbles,
+    maxChars: cfg.humanizeMaxChars,
+    totalDelayCapMs: cfg.humanizeTotalDelayMs,
+  };
+  const plan = planDelivery(String(text ?? '').slice(0, MAX_REPLY_CHARS), opts);
+  for (let i = 0; i < plan.length; i++) {
+    const item = plan[i];
+    if (item.delayMs > 0) await sleep(item.delayMs);
+    try {
+      await deliver(info, item.text);
+    } catch (e) {
+      const err = new Error(e.message);
+      err.remaining = plan.slice(i).map((x) => x.text).join('\n');
+      err.sentBubbles = i;
+      throw err;
+    }
+  }
+  return plan.length;
 }
 
 let draining = false;
@@ -907,10 +958,11 @@ const server = http.createServer(async (req, res) => {
       const { text } = await askDsh(info);
       const reply = (text || '').trim() || '（DSH 没有返回内容）';
       try {
-        await deliver(info, reply.slice(0, MAX_REPLY_CHARS));
+        const bubbles = await deliverHuman(info, reply);
+        if (bubbles > 1) { counts.bubbles += bubbles; lastPlan = { bubbles, chars: reply.length, at: Date.now() }; }
       } catch (sendErr) {
         // DSH 已经算出了答案，只是发不出去：进补发队列，别把答案丢了，也别再发一条「出错了」。
-        enqueueOutbox(info, reply, sendErr);
+        enqueueOutbox(info, sendErr.remaining || reply, sendErr);
         const ms = Date.now() - started;
         counts.failed++;
         record('fail', info.key, ms, '回复已入补发队列（回发失败）');
