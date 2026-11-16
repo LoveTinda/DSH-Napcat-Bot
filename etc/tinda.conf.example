@@ -59,6 +59,20 @@ BRIDGE_GROUP_CONTEXT_MAX=8
 # 注入块字数上限（100–8000）
 BRIDGE_GROUP_CONTEXT_CHARS=1200
 
+# ---- 输出档位与自动压缩（⑤）----
+# 默认档位：minimalist（只发总结）/ concise / detailed / complete
+BRIDGE_OUTPUT_DEFAULT=minimalist
+# 同一聊天聊满多少轮就把前文压成摘要、换新会话（0 = 关）
+BRIDGE_AUTO_COMPACT_ROUNDS=15
+
+# ---- 维护期自动回复（⑤）----
+# DSH 连续失败几次后统一回维护文案（0 = 关）
+BRIDGE_RELAY=1
+BRIDGE_RELAY_AFTER=3
+# 维护文案的冷却秒数：冷却内只回一次
+BRIDGE_RELAY_COOLDOWN_SEC=120
+BRIDGE_RELAY_MESSAGE=机器人正在维护，稍后再试。
+
 # ---- 告警（O-4）----
 # 告警接收的 QQ 号；留空 = 关（连续失败/磁盘告警都不发）
 ALERT_QQ=

@@ -268,6 +268,15 @@ function renderOverview(s) {
   // 命令（②）：只显示命令名和次数，不显示谁发的。
   const cmdTop = s.commands && Array.isArray(s.commands.top) ? s.commands.top : [];
   if (cmdTop.length) row('常用命令', cmdTop.slice(0, 5).map((x) => '/' + x.name + '×' + x.hits).join(' · '));
+  // 输出档位（⑤）：默认是什么、有几个聊天改过、自动压缩阈值。
+  const out = s.output || {};
+  row('输出档位', (out.defaultTier || '-') + '（默认）' + (out.tiers ? ' · ' + out.tiers + ' 个聊天改过' : ''));
+  row('自动压缩', out.autoCompactRounds ? '每 ' + out.autoCompactRounds + ' 轮压一次' + (out.summaries ? ' · 已有 ' + out.summaries + ' 段摘要' : '') : '关闭');
+
+  // 维护期自动回复（⑤）
+  const rl = s.relay || {};
+  row('维护期回复', (rl.summary || '-') + (rl.streak ? ' · 当前连续失败 ' + rl.streak : ''));
+
   // 群上下文（④）：只显示数量与时间，不显示聊天正文。
   const gc = s.groupContext || {};
   row('群上下文', (gc.summary || '未知') + (gc.groups ? ' · ' + gc.groups + ' 群 / ' + gc.messages + ' 条' : ''));

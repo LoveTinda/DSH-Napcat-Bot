@@ -35,7 +35,7 @@ export const COMMANDS = [
   // ---- 模型与风格 ----
   { name: 'model', alias: ['模型'], role: 'admin', kind: 'pending', group: '模型与风格', args: '[别名]', desc: '查看或切换模型（未实现）', detail: '/model — 切换模型；当前由 headless profile 的默认模型决定，尚未实现运行时切换' },
   { name: 'effort', alias: ['推理强度', '思考强度'], role: 'admin', kind: 'pending', group: '模型与风格', args: '[off|low|high|max|auto]', desc: '推理强度（未实现）', detail: '/effort — 推理强度；同上，由 profile 配置决定' },
-  { name: 'output', alias: ['输出'], role: 'admin', kind: 'pending', group: '模型与风格', args: '[档位|--help]', desc: '输出详细程度（⑤ 未做）', detail: '/output — 输出档位；四档渲染在 ⑤ 里实现，当前固定「原文 + 4000 字截断」' },
+  { name: 'output', alias: ['输出'], role: 'admin', kind: 'local', group: '模型与风格', args: '[档位|--help]', desc: '输出详细程度', detail: '/output — 看当前档位与四档说明（minimalist / concise / detailed / complete）\n/output <档位> — 切换本聊天的档位，下一轮生效' },
   { name: 'persona', alias: ['人设'], role: 'user', kind: 'pending', group: '模型与风格', args: '[add <id> <名字>|<提示词>]', desc: '人设 = DSH preset（未实现）', detail: '/persona — 人设；旧实现映射到 DSH 的 agent preset，新桥接器尚未接' },
 
   // ---- 管理与诊断 ----

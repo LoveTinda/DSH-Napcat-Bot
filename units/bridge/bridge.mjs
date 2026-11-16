@@ -27,6 +27,8 @@ import {
 } from './commands.mjs';
 import { planDelivery, describeHumanize, DEFAULT_HUMANIZE } from './humanize.mjs';
 import { createGroupContext, DEFAULT_GROUP_CONTEXT } from './group-context.mjs';
+import { renderByTier, tierListText, normalizeTier, isTier, describeTier, compactNotice, DEFAULT_TIER } from './output.mjs';
+import { createRelay, DEFAULT_RELAY } from './relay.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -65,6 +67,17 @@ const cfg = {
   groupContextEnabled: process.env.BRIDGE_GROUP_CONTEXT !== '0',
   groupContextMax: clampInt(process.env.BRIDGE_GROUP_CONTEXT_MAX, DEFAULT_GROUP_CONTEXT.maxMessages, 1, 50),
   groupContextChars: clampInt(process.env.BRIDGE_GROUP_CONTEXT_CHARS, DEFAULT_GROUP_CONTEXT.maxChars, 100, 8000),
+  // 输出档位（⑤）：每个聊天一份，默认极简。
+  outputDefault: normalizeTier(process.env.BRIDGE_OUTPUT_DEFAULT || DEFAULT_TIER),
+  outputFile: process.env.BRIDGE_OUTPUT_FILE || '',
+  // 自动压缩（⑤）：同一聊天聊满 N 轮就把前文压成摘要、换新会话；0 = 关。
+  autoCompactRounds: clampInt(process.env.BRIDGE_AUTO_COMPACT_ROUNDS, 15, 0, 1000),
+  summaryFile: process.env.BRIDGE_SUMMARY_FILE || '',
+  // 维护期自动回复（⑤）
+  relayEnabled: process.env.BRIDGE_RELAY !== '0',
+  relayAfter: clampInt(process.env.BRIDGE_RELAY_AFTER, DEFAULT_RELAY.afterFailures, 1, 50),
+  relayCooldownMs: clampInt(process.env.BRIDGE_RELAY_COOLDOWN_SEC, Math.round(DEFAULT_RELAY.cooldownMs / 1000), 10, 86400) * 1000,
+  relayMessage: process.env.BRIDGE_RELAY_MESSAGE || DEFAULT_RELAY.message,
 };
 
 /**
@@ -165,6 +178,45 @@ const policyDenied = Object.create(null);   // why → 次数，面板用
 const runningChild = new Map();  // chatKey → 正在跑的 DSH 子进程（/stop 用）
 const notices = new Map();       // chatKey → false 表示关掉「使用提示」（内存态，重启复位）
 const cmdHits = Object.create(null);  // 命令名 → 次数，面板用
+// 输出档位（⑤）：chatKey → tier；落盘，重启后用户的选择还在。
+let tiers = {};
+if (cfg.outputFile) {
+  try { tiers = JSON.parse(fs.readFileSync(cfg.outputFile, 'utf8')) || {}; } catch { tiers = {}; }
+}
+function saveTiers() {
+  if (!cfg.outputFile) return;
+  try {
+    fs.mkdirSync(path.dirname(cfg.outputFile), { recursive: true });
+    const tmp = cfg.outputFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(tiers, null, 1));
+    fs.renameSync(tmp, cfg.outputFile);
+  } catch (e) { log('warn: 档位表写入失败', e.message); }
+}
+/** 目的：取某个聊天当前档位（没设过用默认）。 */
+function tierOf(key) { return normalizeTier(tiers[key] || cfg.outputDefault); }
+
+// 自动压缩（⑤）：chatKey → 之前会话的摘要；下一条消息会把它放在最前面。
+let summaries = {};
+if (cfg.summaryFile) {
+  try { summaries = JSON.parse(fs.readFileSync(cfg.summaryFile, 'utf8')) || {}; } catch { summaries = {}; }
+}
+function saveSummaries() {
+  if (!cfg.summaryFile) return;
+  try {
+    fs.mkdirSync(path.dirname(cfg.summaryFile), { recursive: true });
+    const tmp = cfg.summaryFile + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(summaries, null, 1));
+    fs.renameSync(tmp, cfg.summaryFile);
+  } catch (e) { log('warn: 摘要写入失败', e.message); }
+}
+
+const relay = createRelay({
+  enabled: cfg.relayEnabled,
+  afterFailures: cfg.relayAfter,
+  cooldownMs: cfg.relayCooldownMs,
+  message: cfg.relayMessage,
+});
+
 const groupCtx = createGroupContext({
   enabled: cfg.groupContextEnabled,
   maxMessages: cfg.groupContextMax,
@@ -230,6 +282,17 @@ function snapshot() {
       denied: { ...policyDenied },
       deniedTotal: counts.denied,
     },
+    output: {
+      defaultTier: cfg.outputDefault,
+      tiers: Object.keys(tiers).length,
+      autoCompactRounds: cfg.autoCompactRounds,
+      summaries: Object.keys(summaries).length,
+      list: Object.entries(tiers).slice(0, 20).map(([k, v]) => ({ key: k, tier: v })),
+    },
+    relay: {
+      summary: relay.describe(),
+      ...relay.stats(),
+    },
     groupContext: {
       summary: groupCtx.describe(),
       ...groupCtx.stats(),
@@ -274,6 +337,14 @@ function snapshot() {
       BRIDGE_GROUP_CONTEXT: cfg.groupContextEnabled ? 1 : 0,
       BRIDGE_GROUP_CONTEXT_MAX: cfg.groupContextMax,
       BRIDGE_GROUP_CONTEXT_CHARS: cfg.groupContextChars,
+      BRIDGE_OUTPUT_DEFAULT: cfg.outputDefault,
+      BRIDGE_OUTPUT_FILE: cfg.outputFile || '(不落盘)',
+      BRIDGE_AUTO_COMPACT_ROUNDS: cfg.autoCompactRounds,
+      BRIDGE_SUMMARY_FILE: cfg.summaryFile || '(不落盘)',
+      BRIDGE_RELAY: cfg.relayEnabled ? 1 : 0,
+      BRIDGE_RELAY_AFTER: cfg.relayAfter,
+      BRIDGE_RELAY_COOLDOWN_SEC: Math.round(cfg.relayCooldownMs / 1000),
+      BRIDGE_RELAY_MESSAGE: cfg.relayMessage,
       NAPCAT_API: cfg.napcatApi,
       NAPCAT_TOKEN: cfg.napcatToken ? '(已设置)' : '(未设置)',
       DSH_BIN: cfg.dshBin,
@@ -668,7 +739,11 @@ function runHeadless(prompt, sessionId, chatKey = '') {
 
 // 逐行解析 ndjson；取最后一段助手文本与会话 id
 function parseHeadlessJson(raw) {
-  let text = '', sessionId = '';
+  let final = '', sessionId = '';
+  const texts = [];       // 执行中的正文段（concise 及以上用）
+  const tools = [];       // 工具调用（detailed 及以上用）
+  const thinking = [];    // 思维链（complete 用）
+  const toolIndex = new Map();  // callId → tools 下标，用于回填状态
   for (const line of raw.split('\n')) {
     const s = line.trim();
     if (!s || s[0] !== '{') continue;
@@ -676,13 +751,32 @@ function parseHeadlessJson(raw) {
     try { ev = JSON.parse(s); } catch { continue; }
     const sid = ev.sessionId ?? ev.session_id ?? ev.session;
     if (typeof sid === 'string' && sid) sessionId = sid;
+    const type = String(ev.type ?? ev.kind ?? ev.event ?? '');
+    // thinking：思维链文本
+    if (type === 'thinking' && typeof ev.text === 'string' && ev.text.trim()) { thinking.push(ev.text.trim()); continue; }
+    // tool_call / tool_result：工具调用与结果状态
+    if (type === 'tool_call' || type === 'tool_result') {
+      const callId = ev.callId ?? ev.call_id ?? ev.id;
+      if (type === 'tool_call') {
+        toolIndex.set(callId, tools.length);
+        tools.push({ tool: ev.tool ?? ev.name, input: ev.input, status: 'running' });
+      } else if (callId != null && toolIndex.has(callId)) {
+        tools[toolIndex.get(callId)].status = ev.status ?? 'completed';
+      }
+      continue;
+    }
+    // text：执行中的正文；final：最终总结
     const t = ev.text ?? ev.message ?? ev.content ?? ev.delta?.text ?? ev.data?.text;
     if (typeof t === 'string' && t) {
-      const type = String(ev.type ?? ev.kind ?? ev.event ?? '');
-      if (/assistant|message|text|final|done/i.test(type) || !type) text = t;
+      if (type === 'final') final = t;
+      else if (/text|message|assistant|done/i.test(type) || !type) {
+        final = t;                       // 兼容旧格式：最后一条 text 当最终回答
+        texts.push(t);
+      }
     }
   }
-  return { text: text.trim(), sessionId };
+  const text = (final || (texts.length ? texts[texts.length - 1] : '')).trim();
+  return { text, final: text, texts, tools, thinking, sessionId };
 }
 
 async function runEcho(prompt) {
@@ -698,23 +792,29 @@ async function runEcho(prompt) {
  */
 async function askDsh(info) {
   // 群上下文（④）：只有群聊、且被 @ 时才注入；私聊没有「群」可注入。
-  const prompt = info.kind === 'group' ? (groupCtx.buildBlock(info.groupId) + info.text) : info.text;
-  if (cfg.backend === 'echo') return runEcho(prompt);
+  // 自动压缩后的摘要（⑤）要放在最前面：新会话没有前文，靠它接上。
+  const ctxBlock = info.kind === 'group' ? groupCtx.buildBlock(info.groupId) : '';
+  const summary = summaries[info.key] ? '[之前会话的摘要]\n' + summaries[info.key] + '\n\n' : '';
+  const prompt = summary + ctxBlock + info.text;
+  if (cfg.backend === 'echo') {
+    const out = await runEcho(prompt);
+    return { ...out, final: out.text, texts: [out.text], tools: [], thinking: [] };
+  }
   const prev = sessions[info.key] || '';
   try {
-    const { text, sessionId } = await runHeadless(prompt, prev, info.key);
-    if (sessionId && sessionId !== prev) { sessions[info.key] = sessionId; saveSessions(); }
-    return { text, sessionId };
+    const events = await runHeadless(prompt, prev, info.key);
+    if (events.sessionId && events.sessionId !== prev) { sessions[info.key] = events.sessionId; saveSessions(); }
+    return events;
   } catch (e) {
     // DSH 的会话文件被删/回滚后，--session-id 会报 unknown；保留映射会让该聊天以后每条都失败。
     if (!prev || !/unknown|not found|no such|不存在|未知/i.test(String(e.message))) throw e;
     log('warn: 会话失效，重开', info.key, redactText(e.message));
     delete sessions[info.key];
     saveSessions();
-    const { text, sessionId } = await runHeadless(prompt, '', info.key);
-    if (sessionId) { sessions[info.key] = sessionId; saveSessions(); }
+    const events = await runHeadless(prompt, '', info.key);
+    if (events.sessionId) { sessions[info.key] = events.sessionId; saveSessions(); }
     record('skip', info.key, 0, 'DSH 会话失效，已重开');
-    return { text, sessionId };
+    return events;
   }
 }
 
@@ -726,6 +826,35 @@ function enqueue(key, job) {
   queues.set(key, next);
   next.finally(() => { if (queues.get(key) === next) queues.delete(key); });
   return next;
+}
+
+// ---------- 自动压缩 ----------
+/**
+ * 目的：同一聊天聊满 N 轮后，先让 DSH 把前文压成摘要，再丢掉会话映射——
+ *       下一轮开新会话并把摘要放在最前面，靠它接上（headless 没有 /compact，只能这么做）。
+ * 输入：info（当前消息）；轮数取 chatStats.messages，阈值取 cfg.autoCompactRounds。
+ * 输出：无（fire-and-forget）。
+ * 失败：抛错由调用方 catch 并记 warn，不影响已经发出去的回答。
+ * 副作用：spawn 一次 DSH、写 summaries 与 sessions、清掉会话映射。
+ */
+async function maybeAutoCompact(info) {
+  const n = cfg.autoCompactRounds;
+  if (!n) return;
+  const st = chatStats.get(info.key) || { messages: 0 };
+  if (!st.messages || st.messages % n !== 0) return;
+  const sid = sessions[info.key];
+  if (!sid) return;
+  const started = Date.now();
+  const prompt = '请把这次会话到目前为止的要点压缩成一段不超过 400 字的摘要，直接输出摘要正文，不要客套、不要列清单以外的内容。';
+  const ev = await runHeadless(prompt, sid, '');
+  const sum = String(ev.final || '').trim();
+  if (!sum) { record('skip', info.key, Date.now() - started, '自动压缩：DSH 没给出摘要'); return; }
+  summaries[info.key] = sum.slice(0, 800);
+  saveSummaries();
+  delete sessions[info.key];
+  saveSessions();
+  record('ok', info.key, Date.now() - started, '自动压缩：已换新会话（摘要 ' + sum.length + ' 字）');
+  log('compact', info.kind, info.key, '摘要 ' + sum.length + ' 字');
 }
 
 // ---------- 命令 ----------
@@ -836,6 +965,18 @@ async function handleCommand(info, parsed, role) {
       await say('会话：' + (sid ? maskChatKey(sid) : '还没有') +
         '\n本聊天：' + (st.messages || 0) + ' 条 · 最近 ' + (st.lastMs ? st.lastMs + 'ms' : '-') +
         '\n用法：/session info | new | use <id>');
+      return 'handled';
+    }
+    case 'output': {
+      const arg = parsed.args.trim().toLowerCase();
+      if (!arg || arg === '--help') { await say(tierListText(tierOf(info.key))); return 'handled'; }
+      if (!isTier(arg)) {
+        await say('没有这个档位：' + arg + '\n可选：' + ['minimalist', 'concise', 'detailed', 'complete'].join(' / ') + '\n用 /output 看当前档位');
+        return 'handled';
+      }
+      tiers[info.key] = arg;
+      saveTiers();
+      await say('输出档位已切到：' + describeTier(arg) + '\n下一轮生效。');
       return 'handled';
     }
     case 'context': {
@@ -1000,8 +1141,11 @@ const server = http.createServer(async (req, res) => {
   enqueue(info.key, async () => {
     const started = Date.now();
     try {
-      const { text } = await askDsh(info);
-      const reply = (text || '').trim() || '（DSH 没有返回内容）';
+      const events = await askDsh(info);
+      // 输出档位（⑤）：同一轮事件，按当前聊天选的档位渲染成要发的文字
+      const tier = tierOf(info.key);
+      const rendered = renderByTier(events, tier).trim();
+      const reply = rendered || events.final || '（DSH 没有返回内容）';
       try {
         const bubbles = await deliverHuman(info, reply);
         if (bubbles > 1) { counts.bubbles += bubbles; lastPlan = { bubbles, chars: reply.length, at: Date.now() }; }
@@ -1018,6 +1162,9 @@ const server = http.createServer(async (req, res) => {
       const ms = Date.now() - started;
       counts.ok++;
       alertGate.recordSuccess();
+      // 自动压缩（⑤）：聊满 N 轮就把前文压成摘要、换新会话；后台做，不拖慢这一轮。
+      maybeAutoCompact(info).catch((e) => log('warn: 自动压缩失败', redactText(e.message)));
+      relay.ok();
       const st = chatStats.get(info.key) || { messages: 0 };
       chatStats.set(info.key, { messages: st.messages + 1, lastAt: Date.now(), lastMs: ms });
       record('ok', info.key, ms, reply.length + ' 字');
@@ -1030,7 +1177,12 @@ const server = http.createServer(async (req, res) => {
       record('fail', info.key, ms, e.message);
       log('fail', info.kind, info.key, redactText(e.message));
       noteFailure(e.message);
-      try { await sendReply(info, `出错了：${redactText(e.message).slice(0, 200)}`); } catch (e2) { log('fail:reply', redactText(e2.message)); }
+      // 维护期自动回复（⑤）：连续失败到阈值就统一回维护文案，冷却内不再重复。
+      relay.fail();
+      const r = relay.shouldRelay();
+      const errText = r.relay ? r.text : `出错了：${redactText(e.message).slice(0, 200)}`;
+      if (r.relay) record('skip', info.key, ms, '进入维护期，已回维护文案');
+      try { await deliver(info, errText); } catch (e2) { log('fail:reply', redactText(e2.message)); }
     }
   });
 });

@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.2.28
+- **输出四档（⑤）**：新增 `units/bridge/output.mjs`——minimalist / concise / detailed / complete，
+  按 `dsh headless --json` 的 `thinking` / `tool_call` / `tool_result` / `text` / `final` 事件渲染
+- `/output` 转正：无参打印当前档位（带 ▸，旧机器人原文格式），有参切换并回「下一轮生效」；
+  档位**每个聊天一份**，落 `state/bridge/output.json`，默认 minimalist
+- **自动压缩（⑤）**：headless 没有 `/compact`（实测它只会自己写段摘要），所以做成
+  「聊满 N 轮 → 让 DSH 压成 ≤400 字摘要 → 换新会话 → 摘要放提示词最前面」，
+  默认 15 轮，0 关闭；摘要落 `state/bridge/summaries.json`
+- **维护期自动回复（⑤）**：新增 `units/bridge/relay.mjs`——连续失败 N 次后统一回维护文案，
+  冷却内只回一次，成功即复位
+- 配置：`BRIDGE_OUTPUT_DEFAULT`、`BRIDGE_AUTO_COMPACT_ROUNDS`、`BRIDGE_RELAY*`；
+  面板加「输出档位 / 自动压缩 / 维护期回复」三行
+- 自测：`test-output.mjs` 14 项 + `test-relay.mjs` 8 项 + `test-output-wire.mjs` 13 项
+  （假 dsh 产出完整事件流，验证四档差异、档位按聊天隔离、自动压缩落摘要、连续失败进维护期）
+
 ## v0.2.27
 - **群上下文（④）**：新增 `units/bridge/group-context.mjs`——每个群一段内存环形缓冲，
   只用纯文本，被 @ 时把最近几条拼进提示词（`[群聊上下文] …`），排除当前这句

@@ -34,6 +34,16 @@ export BRIDGE_HUMANIZE_TOTAL_DELAY_MS="$(conf_get BRIDGE_HUMANIZE_TOTAL_DELAY_MS
 export BRIDGE_GROUP_CONTEXT="$(conf_get BRIDGE_GROUP_CONTEXT 1)"
 export BRIDGE_GROUP_CONTEXT_MAX="$(conf_get BRIDGE_GROUP_CONTEXT_MAX 8)"
 export BRIDGE_GROUP_CONTEXT_CHARS="$(conf_get BRIDGE_GROUP_CONTEXT_CHARS 1200)"
+# 输出档位与自动压缩（⑤）
+export BRIDGE_OUTPUT_DEFAULT="$(conf_get BRIDGE_OUTPUT_DEFAULT minimalist)"
+export BRIDGE_OUTPUT_FILE="$DATA/state/bridge/output.json"
+export BRIDGE_AUTO_COMPACT_ROUNDS="$(conf_get BRIDGE_AUTO_COMPACT_ROUNDS 15)"
+export BRIDGE_SUMMARY_FILE="$DATA/state/bridge/summaries.json"
+# 维护期自动回复（⑤）
+export BRIDGE_RELAY="$(conf_get BRIDGE_RELAY 1)"
+export BRIDGE_RELAY_AFTER="$(conf_get BRIDGE_RELAY_AFTER 3)"
+export BRIDGE_RELAY_COOLDOWN_SEC="$(conf_get BRIDGE_RELAY_COOLDOWN_SEC 120)"
+export BRIDGE_RELAY_MESSAGE="$(conf_get BRIDGE_RELAY_MESSAGE "机器人正在维护，稍后再试。")" 
 # 补发队列（T-8）：回复发不出去时落盘，重启后继续补；过期由 BRIDGE_OUTBOX_TTL_MS 控制。
 export BRIDGE_OUTBOX_FILE="$DATA/state/bridge/outbox.json"
 # 去重窗口落盘（跨重启），以及重连补推旧事件的最大容忍时长（秒）。
