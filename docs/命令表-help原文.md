@@ -1,7 +1,8 @@
 # /help 原文（从 QQ「Love Tinda」聊天记录里复制）
 
-> **未实现素材**：这是旧机器人 `/help` 的原文摘录，用来将来重建命令表。
-> 当前桥接器**没有任何命令**，只做消息搬运。见 `RUNBOOK.md`。
+> **命令表已重建（②/v0.2.25）**：下面的原文是规格来源，实现在 `units/bridge/commands.mjs`，
+> 由 `bridge.mjs` 执行。规格里有、还没实现的一律显示「还没实现」，不假装能做。
+> 当前状态见文末「实现状态」表。
 
 > 逐字保存。用于重建 `src/commands.js` 的命令总表与别名映射。
 
@@ -63,3 +64,29 @@ DSH 原生命令（透传，和 WebUI 里敲的是同一条）：
 7. `/persona` 语法：`add <id> <名字> | <提示词>`，也支持直接给提示词
 8. 文件引用语法：`@src/index.js`、`@"带 空格 的路径"`
 9. 明确了两条不变量：`/` 开头必不进模型；群聊默认「一 群一会话」
+
+## 实现状态（2026-11-16）
+
+| 命令 | 别名 | 最低角色 | 状态 |
+| --- | --- | --- | --- |
+| /help | /? /帮助 | user | ✅ 已实现 |
+| /status | /状态 | user | ✅ 已实现 |
+| /ping | — | user | ✅ 已实现 |
+| /new | /reset /新会话 /重置 | user | ✅ 已实现 |
+| /stop | /中断 | user | ✅ 已实现 |
+| /sessions | /history /会话 /历史 /列表 | user | ✅ 已实现（all 需 admin） |
+| /session | /sid /会话管理 | user | ✅ 已实现（info/new；use 需 admin） |
+| /policy | /策略 /acl | user | ✅ 已实现 |
+| /notice | /提示 /使用说明 | user | ✅ 已实现 |
+| /context | /上下文 /最近消息 /ctx | user | ⬜ 未实现（④ 群上下文） |
+| /ws | /workspace /工作区 /use /switch /切换 | admin | ⬜ 未实现 |
+| /ls | /列目录 | user | ⬜ 未实现（不打算做：不让 QQ 变文件浏览器） |
+| /model | /模型 | admin | ⬜ 未实现（由 profile 决定） |
+| /effort | /推理强度 /思考强度 | admin | ⬜ 未实现（由 profile 决定） |
+| /output | /输出 | admin | ⬜ 未实现（⑤ 四档渲染） |
+| /persona | /人设 | user | ⬜ 未实现（映射 DSH agent preset） |
+| /balance | /余额 /查余额 | admin | ⬜ 未实现（账号态无公开余额接口） |
+| /compact /export /feedback /goal /permission /plan | — | 见原文 | ↗ 透传 DSH（原样交给 `dsh headless`，由它决定支持与否） |
+
+自测：`node units/bridge/test-commands.mjs`（18 项，纯表）+ `node units/bridge/test-commands-wire.mjs`
+（19 项，真起桥接器：回执、角色门槛、未知命令、未实现命令的诚实回执、命令不进模型）。

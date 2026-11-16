@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## v0.2.25
+- **命令表（②）**：新增 `units/bridge/commands.mjs`，按旧机器人 `/help` 原文重建 23 条命令与别名
+  （`/help /status /ping /new /stop /sessions /session /policy /notice` 已实现；
+  `/context /ws /ls /model /effort /output /persona /balance` 标注「还没实现」；
+  `/compact /export /feedback /goal /permission /plan` 原样透传给 DSH）
+- 本地命令不进队列：`/stop` 才可能停掉正在跑的那一轮（排在队尾会永远等不到）
+- 角色门槛：`/sessions all`、`/session use`、`/model`、`/effort`、`/output`、`/balance` 要 admin，
+  `/permission` 只有 owner；不够就回「没有权限 + 当前角色」
+- 不认识的 `/xxx` 有回执，不再沉默；命令一律不进模型（`/` 开头必不成为对话内容）
+- 面板新增「命令」计数与「常用命令」；`snapshot()` 暴露 `commands.total/top`
+- 文档：`docs/命令表-help原文.md` 补「实现状态」表；自测 `test-commands.mjs` 18 项 +
+  `test-commands-wire.mjs` 19 项
+
 ## v0.2.24
 - **回复策略（①/⑤ 的第一项）**：新增 `units/bridge/policy.mjs`，移植自旧桥接器完整救回的
   `src/policy.js`（白名单、群必须 @、owner/admin 分级、空白名单即拒绝、危险默认拒绝启动）

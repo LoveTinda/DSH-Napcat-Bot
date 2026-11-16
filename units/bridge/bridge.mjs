@@ -20,8 +20,11 @@ import { renderPanel } from './panel.mjs';
 import { createAlertGate, diskUsedPercent, maskQq } from './alerts.mjs';
 import {
   DEFAULT_POLICY, normalizePolicy, validatePolicy, decidePolicy,
-  commandRole, describePolicy, explainWhy, maskChatKey,
+  commandRole, describePolicy, explainWhy, maskChatKey, roleAtLeast,
 } from './policy.mjs';
+import {
+  parseCommand, helpText, helpFor, unknownCommandText, pendingCommandText,
+} from './commands.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -147,6 +150,9 @@ function loadPolicy() {
 const policyState = loadPolicy();
 const policy = policyState.policy;
 const policyDenied = Object.create(null);   // why → 次数，面板用
+const runningChild = new Map();  // chatKey → 正在跑的 DSH 子进程（/stop 用）
+const notices = new Map();       // chatKey → false 表示关掉「使用提示」（内存态，重启复位）
+const cmdHits = Object.create(null);  // 命令名 → 次数，面板用
 for (const line of policyState.warnings) log('warn: 策略', line);
 for (const line of policyState.errors) log('error: 策略', line);
 log('策略：' + describePolicy(policy) + ' ← ' + policyState.source);
@@ -206,6 +212,10 @@ function snapshot() {
       warnings: policyState.warnings,
       denied: { ...policyDenied },
       deniedTotal: counts.denied,
+    },
+    commands: {
+      total: Object.values(cmdHits).reduce((a, b) => a + b, 0),
+      top: Object.entries(cmdHits).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => ({ name: k, hits: v })),
     },
     sessions: sessionsView,
     events: events.slice(0, MAX_EVENTS),
@@ -551,7 +561,7 @@ function noteFailure(reason) {
 // 正在跑的 dsh 子进程；收到 SIGTERM 时要一起收掉，否则 unit.sh stop 会留下孤儿进程。
 const activeChildren = new Set();
 
-function runHeadless(prompt, sessionId) {
+function runHeadless(prompt, sessionId, chatKey = '') {
   return new Promise((resolve, reject) => {
     const args = [cfg.dshBin, 'headless', '--json'];
     if (sessionId) args.push('--session-id', sessionId);
@@ -562,7 +572,11 @@ function runHeadless(prompt, sessionId) {
     if (cfg.dshHome) env.DSH_HOME = cfg.dshHome;
     const child = spawn(cfg.nodeBin, args, { env, stdio: ['pipe', 'pipe', 'pipe'] });
     activeChildren.add(child);
-    child.on('close', () => activeChildren.delete(child));
+    if (chatKey) runningChild.set(chatKey, child);
+    child.on('close', () => {
+      activeChildren.delete(child);
+      if (chatKey && runningChild.get(chatKey) === child) runningChild.delete(chatKey);
+    });
     let out = '', err = '', killed = false, settled = false;
     const finish = (fn, value) => { if (settled) return; settled = true; clearTimeout(timer); fn(value); };
     const timer = setTimeout(() => { killed = true; child.kill('SIGKILL'); }, cfg.timeoutMs);
@@ -616,7 +630,7 @@ async function askDsh(info) {
   if (cfg.backend === 'echo') return runEcho(info.text);
   const prev = sessions[info.key] || '';
   try {
-    const { text, sessionId } = await runHeadless(info.text, prev);
+    const { text, sessionId } = await runHeadless(info.text, prev, info.key);
     if (sessionId && sessionId !== prev) { sessions[info.key] = sessionId; saveSessions(); }
     return { text, sessionId };
   } catch (e) {
@@ -625,7 +639,7 @@ async function askDsh(info) {
     log('warn: 会话失效，重开', info.key, redactText(e.message));
     delete sessions[info.key];
     saveSessions();
-    const { text, sessionId } = await runHeadless(info.text, '');
+    const { text, sessionId } = await runHeadless(info.text, '', info.key);
     if (sessionId) { sessions[info.key] = sessionId; saveSessions(); }
     record('skip', info.key, 0, 'DSH 会话失效，已重开');
     return { text, sessionId };
@@ -640,6 +654,146 @@ function enqueue(key, job) {
   queues.set(key, next);
   next.finally(() => { if (queues.get(key) === next) queues.delete(key); });
   return next;
+}
+
+// ---------- 命令 ----------
+/**
+ * 目的：执行桥接器本地命令（不经过 DSH、不进队列），并把回执发回聊天。
+ * 输入：info（来自 classifyEvent）、parsed（parseCommand 的结果）、role（user/admin/owner）。
+ * 输出：'handled' 表示已处理；'passthrough' 表示要交给 DSH。
+ * 失败：回发失败进补发队列；命令本身不抛错。
+ * 副作用：改 sessions/notices/cmdHits/counts，发网络请求。
+ */
+async function handleCommand(info, parsed, role) {
+  const started = Date.now();
+  const c = parsed.cmd;
+  const say = async (text, note) => {
+    const body = String(text || '').slice(0, MAX_REPLY_CHARS);
+    try {
+      await deliver(info, body);
+      counts.ok++;
+      record('ok', info.key, Date.now() - started, note || ('命令 /' + (c ? c.name : parsed.name)));
+    } catch (e) {
+      counts.failed++;
+      enqueueOutbox(info, body, e);
+      record('fail', info.key, Date.now() - started, '命令回执入补发队列');
+      log('fail:cmd', info.kind, info.key, redactText(e.message));
+    }
+  };
+
+  if (!c) {
+    cmdHits['?unknown'] = (cmdHits['?unknown'] || 0) + 1;
+    await say(unknownCommandText(parsed.name));
+    return 'handled';
+  }
+  cmdHits[c.name] = (cmdHits[c.name] || 0) + 1;
+  if (c.kind === 'passthrough') return 'passthrough';
+  if (!roleAtLeast(role, c.role)) {
+    await say('没有权限：/' + c.name + ' 需要 ' + c.role + '。当前角色：' + role);
+    return 'handled';
+  }
+  if (c.kind === 'pending') { await say(pendingCommandText(c)); return 'handled'; }
+
+  switch (c.name) {
+    case 'help':
+      await say(parsed.args ? helpFor(parsed.args) : helpText());
+      return 'handled';
+    case 'ping':
+      await say('pong · 已运行 ' + Math.round((Date.now() - startedAt) / 1000) + ' 秒 · 后端 ' + cfg.backend);
+      return 'handled';
+    case 'status': {
+      const sid = sessions[info.key] || '';
+      const st = chatStats.get(info.key) || {};
+      const lines = [
+        '后端：' + cfg.backend,
+        '监听：' + cfg.listen,
+        '会话：' + (sid ? maskChatKey(sid) : '还没有（下一条消息会新建）'),
+        '本聊天：' + (st.messages || 0) + ' 条 · 最近 ' + (st.lastMs ? st.lastMs + 'ms' : '-'),
+        '策略：' + describePolicy(policy) + (policy.hardened ? '' : '（未加固）'),
+        '你的角色：' + role,
+        '计数：收到 ' + counts.incoming + ' · 成功 ' + counts.ok + ' · 失败 ' + counts.failed
+          + ' · 跳过 ' + counts.skipped + ' · 策略拒 ' + counts.denied,
+      ];
+      await say(lines.join('\n'));
+      return 'handled';
+    }
+    case 'new':
+      delete sessions[info.key];
+      saveSessions();
+      await say('已开新会话' + (parsed.args ? '（' + parsed.args + '）' : '') + '，下一条消息生效；旧会话仍在 DSH 里');
+      return 'handled';
+    case 'stop': {
+      const child = runningChild.get(info.key);
+      if (!child) { await say('现在没有在跑的回合'); return 'handled'; }
+      try { child.kill('SIGTERM'); } catch (e) { log('warn: /stop kill 失败', e.code || e.message); }
+      setTimeout(() => { try { if (!child.killed) child.kill('SIGKILL'); } catch {} }, 1200).unref();
+      await say('已中断当前回合');
+      return 'handled';
+    }
+    case 'sessions': {
+      if (parsed.args === 'all' && !roleAtLeast(role, 'admin')) { await say('没有权限：/sessions all 需要 admin'); return 'handled'; }
+      const keys = parsed.args === 'all' ? [...new Set([...Object.keys(sessions), ...chatStats.keys()])] : [info.key];
+      if (!keys.length) { await say('还没有任何会话'); return 'handled'; }
+      const rows = keys.slice(0, 20).map((k) => {
+        const sid = sessions[k] || '(未建立)';
+        const st = chatStats.get(k) || {};
+        return '· ' + maskChatKey(k) + ' → ' + maskChatKey(sid) + ' · ' + (st.messages || 0) + ' 条';
+      });
+      await say('会话（' + keys.length + ' 个）：\n' + rows.join('\n'));
+      return 'handled';
+    }
+    case 'session': {
+      const sub = (parsed.args.split(/\s+/)[0] || 'info').toLowerCase();
+      if (sub === 'new') {
+        delete sessions[info.key];
+        saveSessions();
+        await say('已开新会话，下一条消息生效');
+        return 'handled';
+      }
+      if (sub === 'use') {
+        if (!roleAtLeast(role, 'admin')) { await say('没有权限：/session use 需要 admin'); return 'handled'; }
+        const id = parsed.args.split(/\s+/)[1] || '';
+        if (!/^[A-Za-z0-9._:-]{6,}$/.test(id)) { await say('用法：/session use <DSH 会话 id>'); return 'handled'; }
+        sessions[info.key] = id;
+        saveSessions();
+        await say('已切到会话 ' + maskChatKey(id) + '（如果 DSH 那边不存在，下一条会收到它的报错）');
+        return 'handled';
+      }
+      const sid = sessions[info.key] || '';
+      const st = chatStats.get(info.key) || {};
+      await say('会话：' + (sid ? maskChatKey(sid) : '还没有') +
+        '\n本聊天：' + (st.messages || 0) + ' 条 · 最近 ' + (st.lastMs ? st.lastMs + 'ms' : '-') +
+        '\n用法：/session info | new | use <id>');
+      return 'handled';
+    }
+    case 'policy': {
+      const head = '策略：' + describePolicy(policy) + (policy.hardened ? '' : '（未加固）') +
+        '\n来源：' + policyState.source + '\n你的角色：' + role;
+      if (!parsed.args) { await say(head); return 'handled'; }
+      // 拿用户给的文本当一条假消息，告诉他会不会回、为什么
+      const verdict = decidePolicy(policy, {
+        isGroup: info.kind === 'group', userId: info.userId, groupId: info.groupId,
+        mentioned: true, selfId: info.selfId,
+      });
+      await say(head + '\n\n对「' + parsed.args.slice(0, 60) + '」这类消息：' +
+        (verdict.ok ? '会回' : '不会回（' + explainWhy(verdict.why) + '）'));
+      return 'handled';
+    }
+    case 'notice': {
+      const arg = parsed.args.toLowerCase();
+      if (!arg) {
+        await say('本聊天的使用提示：' + (notices.get(info.key) === false ? '已关' : '开着') + '\n用法：/notice off | on');
+        return 'handled';
+      }
+      if (arg !== 'off' && arg !== 'on') { await say('用法：/notice off | on'); return 'handled'; }
+      notices.set(info.key, arg === 'on');
+      await say('本聊天的使用提示已' + (arg === 'on' ? '打开' : '关掉'));
+      return 'handled';
+    }
+    default:
+      await say(pendingCommandText(c));
+      return 'handled';
+  }
 }
 
 // ---------- HTTP ----------
@@ -732,27 +886,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 命令（②）：本地命令当场处理、不进队列——否则 /stop 会排在自己要停的那一轮后面，
+  // 永远等不到执行。只有 DSH 原生命令（/compact 等）才落到队列里透传。
+  const parsed = parseCommand(info.text);
+  if (parsed) {
+    const role = commandRole(policy, { userId: info.userId });
+    const outcome = parsed.cmd && parsed.cmd.kind === 'passthrough'
+      ? 'passthrough'
+      : await handleCommand(info, parsed, role).catch((e) => {
+        log('fail:cmd', info.kind, info.key, redactText(e.message));
+        return 'handled';
+      });
+    if (outcome === 'handled') { counts.incoming++; alertGate.recordSuccess(); return; }
+  }
+
   counts.incoming++;
   enqueue(info.key, async () => {
     const started = Date.now();
     try {
-      // 两个最小的控制命令：会话乱了能自己救，不用去翻 state 文件。只对私聊开放，
-      // 避免群里任何人一句话就把大家的会话重置掉。
-      const cmd = info.text.trim().toLowerCase();
-      if (info.kind === 'private' && (cmd === '/reset' || cmd === '/session')) {
-        if (cmd === '/reset') {
-          delete sessions[info.key];
-          saveSessions();
-          await deliver(info, '已重置这个聊天的 DSH 会话，下一条消息会开新会话');
-          record('ok', info.key, Date.now() - started, '手动重置会话');
-        } else {
-          const sid = sessions[info.key] || '';
-          await deliver(info, sid ? '当前会话：' + sid : '还没有建立 DSH 会话（下一条消息会新建）');
-          record('ok', info.key, Date.now() - started, '查询会话');
-        }
-        alertGate.recordSuccess();
-        return;
-      }
       const { text } = await askDsh(info);
       const reply = (text || '').trim() || '（DSH 没有返回内容）';
       try {

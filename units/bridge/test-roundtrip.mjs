@@ -162,7 +162,7 @@ await post({
   message_id: 61, message: [{ type: 'text', data: { text: '/reset' } }],
 });
 const resetReply = await waitFor(() => sent.slice(cmdMark).find((s) => s.path === '/send_private_msg'));
-check('/reset 有回复', Boolean(resetReply) && String(resetReply.body.message).includes('已重置'),
+check('/reset 有回复', Boolean(resetReply) && /新会话/.test(String(resetReply.body.message)),
   JSON.stringify(resetReply && resetReply.body));
 await post({
   post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20010,

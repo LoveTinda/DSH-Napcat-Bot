@@ -234,6 +234,7 @@ function renderOverview(s) {
     metric('失败', String(c.failed || 0), { warn: (c.failed || 0) > 0 }),
     metric('跳过', String(c.skipped || 0)),
     metric('策略拒绝', String(c.denied || 0), { warn: (c.denied || 0) > 0 }),
+    metric('命令', String((s.commands && s.commands.total) || 0)),
     metric('排队中', String(c.busy || 0), { warn: (c.busy || 0) > 0 }),
     metric('待补发', String(c.outbox || 0), { warn: (c.outbox || 0) > 0 }),
     metric('运行时长', fmtUptime(s.uptimeMs), { small: true })
@@ -263,6 +264,9 @@ function renderOverview(s) {
   row('策略来源', pol.source || '-');
   if (top) row('被拒原因', top);
   if (pol.errors && pol.errors.length) row('策略错误', pol.errors.join(' / '), 'warn');
+  // 命令（②）：只显示命令名和次数，不显示谁发的。
+  const cmdTop = s.commands && Array.isArray(s.commands.top) ? s.commands.top : [];
+  if (cmdTop.length) row('常用命令', cmdTop.slice(0, 5).map((x) => '/' + x.name + '×' + x.hits).join(' · '));
 }
 
 function renderSessions(s) {
