@@ -8,7 +8,11 @@ QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，�
 回复发不出去时先重试、再进补发队列，NapCat/网络恢复后自动送达（同一 `message_id` 不重复回答）；
 连续失败或磁盘将满会私聊告警给 `ALERT_QQ`。
 
-**还没做什么**：`/output` 分档、完整 `/help` 命令表、群上下文注入、DSH 独立容器、Magisk 打包实测。
+已经补回来的旧行为：回复策略（白名单 / 群必须 @ / owner-admin）、`/help` 命令表（23 条）、
+拟人化投递（分条 + 停顿）、群上下文注入、`/output` 四档、自动压缩、维护期自动回复。
+
+**还没做什么**：`/ws` `/ls` `/model` `/effort` `/persona` `/balance` 这几条命令、
+Magisk 真机实测（当前跑在 App 的 Ubuntu 里）、`contracts/` 与实现的收口。
 
 ## 先读这两篇
 
