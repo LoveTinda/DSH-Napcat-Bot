@@ -28,7 +28,7 @@ export const COMMANDS = [
   { name: 'stop', alias: ['中断'], role: 'user', kind: 'local', group: '会话与上下文', args: '', desc: '中断当前这一轮', detail: '/stop — 杀掉这个聊天正在跑的 DSH 子进程；排队中的下一条不受影响' },
   { name: 'sessions', alias: ['history', '会话', '历史', '列表'], role: 'user', kind: 'local', group: '会话与上下文', args: '[all]', desc: '列出本聊天的会话', detail: '/sessions — 列当前聊天的会话映射\n/sessions all — 需要 admin，列出全部聊天（号码脱敏）' },
   { name: 'session', alias: ['sid', '会话管理'], role: 'user', kind: 'local', group: '会话与上下文', args: '[info|new|use <id>]', desc: '会话详情与管理', detail: '/session — 同 info\n/session info — 当前会话 id、建立时间、轮数\n/session new — 同 /new\n/session use <id> — 切到指定 DSH 会话（需要 admin）' },
-  { name: 'context', alias: ['上下文', '最近消息', 'ctx'], role: 'user', kind: 'pending', group: '会话与上下文', args: '', desc: '群上下文缓冲：下一条会带什么（④ 未做）', detail: '/context — 显示本群最近消息缓冲与下一条会注入哪几条；群上下文功能尚未实现' },
+  { name: 'context', alias: ['上下文', '最近消息', 'ctx'], role: 'user', kind: 'local', group: '会话与上下文', args: '[clear]', desc: '群上下文缓冲：有哪些、下一条会带什么', detail: '/context — 显示本群缓冲的条数、时间范围，以及下一条会注入的预览\n/context clear — 清掉本群缓冲（admin）' },
   { name: 'ws', alias: ['workspace', '工作区', 'use', 'switch', '切换'], role: 'admin', kind: 'pending', group: '会话与上下文', args: '[编号|id|路径]', desc: '切换会话或工作区（未实现）', detail: '/ws — 切换工作区；当前桥接器每轮用 DSH 的默认工作区，尚未实现切换' },
   { name: 'ls', alias: ['列目录'], role: 'user', kind: 'pending', group: '会话与上下文', args: '[子路径]', desc: '列工作区文件（未实现）', detail: '/ls — 列工作区文件；为了不让 QQ 变成文件浏览器，暂不实现' },
 

@@ -26,6 +26,7 @@ import {
   parseCommand, helpText, helpFor, unknownCommandText, pendingCommandText,
 } from './commands.mjs';
 import { planDelivery, describeHumanize, DEFAULT_HUMANIZE } from './humanize.mjs';
+import { createGroupContext, DEFAULT_GROUP_CONTEXT } from './group-context.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -60,6 +61,10 @@ const cfg = {
   humanizeMaxBubbles: clampInt(process.env.BRIDGE_HUMANIZE_MAX_BUBBLES, DEFAULT_HUMANIZE.maxBubbles, 1, 10),
   humanizeMaxChars: clampInt(process.env.BRIDGE_HUMANIZE_MAX_CHARS, DEFAULT_HUMANIZE.maxChars, 40, 2000),
   humanizeTotalDelayMs: clampInt(process.env.BRIDGE_HUMANIZE_TOTAL_DELAY_MS, DEFAULT_HUMANIZE.totalDelayCapMs, 0, 60000),
+  // 群上下文（④）：把「刚才在聊什么」带进提示词。0 = 关。
+  groupContextEnabled: process.env.BRIDGE_GROUP_CONTEXT !== '0',
+  groupContextMax: clampInt(process.env.BRIDGE_GROUP_CONTEXT_MAX, DEFAULT_GROUP_CONTEXT.maxMessages, 1, 50),
+  groupContextChars: clampInt(process.env.BRIDGE_GROUP_CONTEXT_CHARS, DEFAULT_GROUP_CONTEXT.maxChars, 100, 8000),
 };
 
 /**
@@ -160,6 +165,11 @@ const policyDenied = Object.create(null);   // why → 次数，面板用
 const runningChild = new Map();  // chatKey → 正在跑的 DSH 子进程（/stop 用）
 const notices = new Map();       // chatKey → false 表示关掉「使用提示」（内存态，重启复位）
 const cmdHits = Object.create(null);  // 命令名 → 次数，面板用
+const groupCtx = createGroupContext({
+  enabled: cfg.groupContextEnabled,
+  maxMessages: cfg.groupContextMax,
+  maxChars: cfg.groupContextChars,
+});
 for (const line of policyState.warnings) log('warn: 策略', line);
 for (const line of policyState.errors) log('error: 策略', line);
 log('策略：' + describePolicy(policy) + ' ← ' + policyState.source);
@@ -220,6 +230,10 @@ function snapshot() {
       denied: { ...policyDenied },
       deniedTotal: counts.denied,
     },
+    groupContext: {
+      summary: groupCtx.describe(),
+      ...groupCtx.stats(),
+    },
     humanize: {
       summary: describeHumanize({
         enabled: cfg.humanizeEnabled,
@@ -257,6 +271,9 @@ function snapshot() {
       BRIDGE_HUMANIZE_MAX_BUBBLES: cfg.humanizeMaxBubbles,
       BRIDGE_HUMANIZE_MAX_CHARS: cfg.humanizeMaxChars,
       BRIDGE_HUMANIZE_TOTAL_DELAY_MS: cfg.humanizeTotalDelayMs,
+      BRIDGE_GROUP_CONTEXT: cfg.groupContextEnabled ? 1 : 0,
+      BRIDGE_GROUP_CONTEXT_MAX: cfg.groupContextMax,
+      BRIDGE_GROUP_CONTEXT_CHARS: cfg.groupContextChars,
       NAPCAT_API: cfg.napcatApi,
       NAPCAT_TOKEN: cfg.napcatToken ? '(已设置)' : '(未设置)',
       DSH_BIN: cfg.dshBin,
@@ -329,7 +346,9 @@ function classifyEvent(ev) {
   // 交给策略判定（mention 模式本来就要求 @），否则用户 @ 了却没反应。
   if (!text && !mentioned) return { skip: '空消息或不支持的消息类型' };
   const key = kind === 'group' ? `group:${ev.group_id}` : `private:${senderId}`;
-  return { info: { kind, key, text: text || '(只是 @ 了我，没有正文)', userId: senderId, groupId: ev.group_id, messageId: ev.message_id, mentioned, selfId } };
+  const sender = ev.sender && typeof ev.sender === 'object' ? ev.sender : {};
+  const name = String(sender.card || sender.nickname || '').slice(0, 32);
+  return { info: { kind, key, text: text || '(只是 @ 了我，没有正文)', userId: senderId, name, groupId: ev.group_id, messageId: ev.message_id, mentioned, selfId } };
 }
 
 /**
@@ -678,10 +697,12 @@ async function runEcho(prompt) {
  * 副作用：更新 sessions 并落盘。
  */
 async function askDsh(info) {
-  if (cfg.backend === 'echo') return runEcho(info.text);
+  // 群上下文（④）：只有群聊、且被 @ 时才注入；私聊没有「群」可注入。
+  const prompt = info.kind === 'group' ? (groupCtx.buildBlock(info.groupId) + info.text) : info.text;
+  if (cfg.backend === 'echo') return runEcho(prompt);
   const prev = sessions[info.key] || '';
   try {
-    const { text, sessionId } = await runHeadless(info.text, prev, info.key);
+    const { text, sessionId } = await runHeadless(prompt, prev, info.key);
     if (sessionId && sessionId !== prev) { sessions[info.key] = sessionId; saveSessions(); }
     return { text, sessionId };
   } catch (e) {
@@ -690,7 +711,7 @@ async function askDsh(info) {
     log('warn: 会话失效，重开', info.key, redactText(e.message));
     delete sessions[info.key];
     saveSessions();
-    const { text, sessionId } = await runHeadless(info.text, '', info.key);
+    const { text, sessionId } = await runHeadless(prompt, '', info.key);
     if (sessionId) { sessions[info.key] = sessionId; saveSessions(); }
     record('skip', info.key, 0, 'DSH 会话失效，已重开');
     return { text, sessionId };
@@ -817,6 +838,24 @@ async function handleCommand(info, parsed, role) {
         '\n用法：/session info | new | use <id>');
       return 'handled';
     }
+    case 'context': {
+      if (info.kind !== 'group') { await say('这个聊天没有群上下文（只有群聊才有）'); return 'handled'; }
+      if (parsed.args.toLowerCase() === 'clear') {
+        if (!roleAtLeast(role, 'admin')) { await say('没有权限：/context clear 需要 admin'); return 'handled'; }
+        groupCtx.clear(info.groupId);
+        await say('已清掉本群的上下文缓冲');
+        return 'handled';
+      }
+      const st = groupCtx.stats();
+      const mine = groupCtx.recent(info.groupId, cfg.groupContextMax);
+      if (!mine.length) { await say('本群还没有上下文缓冲（' + groupCtx.describe() + '）'); return 'handled'; }
+      const block = groupCtx.buildBlock(info.groupId);
+      const span = mine.length ? Math.round((mine[mine.length - 1].at - mine[0].at) / 1000) + ' 秒' : '-';
+      const preview = block ? block.split('\n').slice(0, 5).join('\n') : '(下一条不会注入：历史不足或已关闭)';
+      await say('本群缓冲：' + mine.length + ' 条 · 跨度 ' + span + '\n全局：' + st.groups + ' 个群 / ' + st.messages + ' 条\n' +
+        groupCtx.describe() + '\n\n下一条会注入：\n' + preview.slice(0, 600));
+      return 'handled';
+    }
     case 'policy': {
       const head = '策略：' + describePolicy(policy) + (policy.hardened ? '' : '（未加固）') +
         '\n来源：' + policyState.source + '\n你的角色：' + role;
@@ -921,6 +960,12 @@ const server = http.createServer(async (req, res) => {
     record('skip', info.key, 0, '重复推送（同一 message_id），已忽略');
     return;
   }
+  // 群上下文（④）：先记下来，再判策略——群里没 @ 的闲聊也要进缓冲，
+  // 否则被 @ 的时候上下文是空的，等于没有上下文。
+  if (info.kind === 'group') {
+    groupCtx.record({ groupId: info.groupId, userId: info.userId, name: info.name, text: info.text, at: Date.now(), messageId: info.messageId });
+  }
+
   // 回复策略（①）：白名单 / 群里必须 @ / 自己发的。拒绝只记元信息，不回任何内容。
   const verdict = decidePolicy(policy, {
     isGroup: info.kind === 'group',

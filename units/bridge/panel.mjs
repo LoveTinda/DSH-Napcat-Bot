@@ -268,6 +268,10 @@ function renderOverview(s) {
   // 命令（②）：只显示命令名和次数，不显示谁发的。
   const cmdTop = s.commands && Array.isArray(s.commands.top) ? s.commands.top : [];
   if (cmdTop.length) row('常用命令', cmdTop.slice(0, 5).map((x) => '/' + x.name + '×' + x.hits).join(' · '));
+  // 群上下文（④）：只显示数量与时间，不显示聊天正文。
+  const gc = s.groupContext || {};
+  row('群上下文', (gc.summary || '未知') + (gc.groups ? ' · ' + gc.groups + ' 群 / ' + gc.messages + ' 条' : ''));
+
   // 拟人化投递（③）：一句话说明当前节奏，外加最近一次分了几条。
   const hu = s.humanize || {};
   const lastHu = hu.last ? ' · 最近 ' + hu.last.bubbles + ' 条 / ' + hu.last.chars + ' 字' : '';

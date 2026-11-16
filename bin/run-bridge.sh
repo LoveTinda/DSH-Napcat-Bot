@@ -30,6 +30,10 @@ export BRIDGE_HUMANIZE="$(conf_get BRIDGE_HUMANIZE 1)"
 export BRIDGE_HUMANIZE_MAX_BUBBLES="$(conf_get BRIDGE_HUMANIZE_MAX_BUBBLES 3)"
 export BRIDGE_HUMANIZE_MAX_CHARS="$(conf_get BRIDGE_HUMANIZE_MAX_CHARS 240)"
 export BRIDGE_HUMANIZE_TOTAL_DELAY_MS="$(conf_get BRIDGE_HUMANIZE_TOTAL_DELAY_MS 4000)"
+# 群上下文（④）：没 @ 的群消息也进缓冲，被 @ 时把最近几条带进提示词。
+export BRIDGE_GROUP_CONTEXT="$(conf_get BRIDGE_GROUP_CONTEXT 1)"
+export BRIDGE_GROUP_CONTEXT_MAX="$(conf_get BRIDGE_GROUP_CONTEXT_MAX 8)"
+export BRIDGE_GROUP_CONTEXT_CHARS="$(conf_get BRIDGE_GROUP_CONTEXT_CHARS 1200)"
 # 补发队列（T-8）：回复发不出去时落盘，重启后继续补；过期由 BRIDGE_OUTBOX_TTL_MS 控制。
 export BRIDGE_OUTBOX_FILE="$DATA/state/bridge/outbox.json"
 # 去重窗口落盘（跨重启），以及重连补推旧事件的最大容忍时长（秒）。

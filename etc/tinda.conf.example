@@ -51,6 +51,14 @@ BRIDGE_HUMANIZE_MAX_CHARS=240
 # 整轮条间停顿总和上限（毫秒，0–60000）：等太久像挂了
 BRIDGE_HUMANIZE_TOTAL_DELAY_MS=4000
 
+# ---- 群上下文（④）----
+# 群里没 @ 的闲聊也记下来；被 @ 时把最近几条带进提示词。0 = 关。
+BRIDGE_GROUP_CONTEXT=1
+# 每个群留几条（1–50）
+BRIDGE_GROUP_CONTEXT_MAX=8
+# 注入块字数上限（100–8000）
+BRIDGE_GROUP_CONTEXT_CHARS=1200
+
 # ---- 告警（O-4）----
 # 告警接收的 QQ 号；留空 = 关（连续失败/磁盘告警都不发）
 ALERT_QQ=
