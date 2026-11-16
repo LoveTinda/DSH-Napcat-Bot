@@ -4,6 +4,8 @@
  *       同时提供只读面板与状态接口，供网关 /bridge/ 反代。
  * 边界：不做权限、人设、/output 分档、群上下文（后续单元再加）；不解析富文本，只取纯文本；
  *       不保存聊天记录；面板不接受写操作；补发队列只存「待发出的回复」和最短路由信息，过期即删。
+ *       lastBubbles（chatKey → 上一轮气泡 id）只存内存、不落盘：气泡 id 只在 NapCat 会话有效期内
+ *       可删，重启后陈旧 id 反而会报错；重启后第一次 recall 按「没有上一轮」跳过即可。
  * 依赖：NapCat 的 OneBot HTTP API（默认 127.0.0.1:3001）、DSH 的 `headless` 子命令、本机 node、
  *       ./alerts.mjs（连续失败/磁盘告警的判定）。
  * 失败：单条消息失败只回复错误摘要并记日志，进程不退出；上游不可达时由 DSH 自身报错；
@@ -151,6 +153,9 @@ const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied:
 let lastPlan = null;   // 最近一次分条投递：{ bubbles, chars, at }
 let lastInteractions = null;   // 最近一轮动作：{ at, executed, failed, skipped, kinds }
 const interactionTotals = { turns: 0, executed: 0, failed: 0, skipped: 0 };
+// 每个聊天「上一轮」发出的气泡 id；[[recall]] 删这份，不删本轮（P0-1b）。
+// 只存内存：NapCat 会话结束后旧 id 无效，重启后重来比删错安全。
+const lastBubbles = new Map();
 const hintedSessions = new Set();   // 已经拼过交互提示的 DSH 会话 id（进程重启后重注一次无害）
 const events = [];               // 最近 100 条处理结果，只放元信息，不放聊天内容
 const chatStats = new Map();     // chatKey → { messages, lastAt, lastMs }
@@ -521,7 +526,7 @@ async function sendReply(info, text) {
   if (!res.ok || (data && data.status && data.status !== 'ok')) {
     throw new Error(`发送失败 HTTP ${res.status} ${redactText(JSON.stringify(data)).slice(0, 200)}`);
   }
-  // 撤回需要 message_id；旧实现没返回，导致「删本轮气泡」无从下手（P0-1）。
+  // 撤回上一轮需要 message_id；旧实现没返回，导致「删气泡」无从下手（P0-1）。
   return data && data.data ? data.data.message_id : undefined;
 }
 
@@ -1248,6 +1253,8 @@ const server = http.createServer(async (req, res) => {
       const actionOnly = !reply && parsed.actions.length > 0;
       // 纯动作回复不发空消息；只有「模型真没内容且没有动作」时才保留旧的兜底文案。
       if (!reply && !actionOnly) reply = '（DSH 没有返回内容）';
+      // recall 只删这份；先取快照，避免本轮发完正文后被覆盖成 currentIds。
+      const prevIds = lastBubbles.get(info.key) || [];
       let messageIds = [];
       try {
         if (reply) {
@@ -1265,12 +1272,15 @@ const server = http.createServer(async (req, res) => {
         noteFailure('回发失败：' + sendErr.message);
         return;
       }
+      // 正文已送达（或本轮是纯动作），本轮的 id 变成下一轮的「上一轮」。
+      // 纯动作轮存空数组：下一轮 recall 会按「没有上一轮气泡」skipped，而不是删更早的一轮。
+      lastBubbles.set(info.key, messageIds);
 
       // 正文已送达（或本轮是纯动作）再执行动作；总时限/失败只记 warn，不影响上面的正文。
       let act = { executed: 0, failed: 0, skipped: 0, errors: [] };
       if (parsed.actions.length) {
         try {
-          act = await runActions(parsed.actions, { info, messageIds }, {
+          act = await runActions(parsed.actions, { info, currentIds: messageIds, prevIds }, {
             api: cfg.napcatApi,
             token: cfg.napcatToken,
             groupPoke: cfg.interactionsGroupPoke,
@@ -1279,12 +1289,13 @@ const server = http.createServer(async (req, res) => {
           });
         } catch (e) {
           // runActions 约定不抛错；这里只是最后一道保险，别让动作把整轮打成失败。
-          act = { executed: 0, failed: parsed.actions.length, skipped: 0, errors: [{ kind: '?', message: String((e && e.message) || e) }] };
+          act = { executed: 0, failed: parsed.actions.length, skipped: 0, errors: [{ kind: '?', message: String((e && e.message) || e) }], warnings: [] };
         }
         interactionTotals.turns++;
         interactionTotals.executed += act.executed;
         interactionTotals.failed += act.failed;
         interactionTotals.skipped += act.skipped;
+        for (const w of act.warnings || []) log('warn: ' + w);
         for (const err of act.errors) log('warn: 动作执行异常', err.kind, redactText(err.message));
       }
       // 面板的「本轮」要每轮刷新：这一轮没有动作时也显示 0 个，而不是停在上一轮的数字上。

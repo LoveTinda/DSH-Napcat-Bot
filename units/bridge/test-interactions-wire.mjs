@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
  * 目的：用真桥接器 + 假 NapCat + 假 DSH 验证交互动作的线上行为——标记不进正文、动作真的发出、
- *       撤回删本轮气泡、群 poke 默认关、动作报错不影响正文、总开关关闭时原样保留、提示只注入一次。
+ *       撤回删「上一轮」气泡（不删本轮）、群 poke 默认关、动作报错不影响正文、总开关关闭时原样保留、
+ *       提示只注入一次。
  * 边界：不连真 QQ / 真 DSH；每个场景起一个临时端口上的桥接器，结束全部杀掉。
  * 依赖：node:http/child_process/fs/os/path/url；./bridge.mjs。
  * 失败：任一断言不过 → 退出码 1，并打印桥接器日志尾部与收到的请求。
- * 副作用：占 16741–16748 与 13007 端口，写临时目录（结束删除）。
+ * 副作用：占 16741–16752 与 13007 端口，写临时目录（结束删除）。
  */
 
 import http from 'node:http';
@@ -149,6 +150,17 @@ async function waitFor(cond, ms = 6000) {
   }
   return false;
 }
+async function waitTurn(port, okCount, ms = 8000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    try {
+      const s = await (await fetch('http://127.0.0.1:' + port + '/panel/state.json')).json();
+      if (s.counts && s.counts.ok >= okCount) return s;
+    } catch {}
+    await wait(60);
+  }
+  return null;
+}
 function readDshLog(file) {
   return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
@@ -162,6 +174,7 @@ const group = (id, text) => ({
   message_id: id, message: [{ type: 'at', data: { qq: '10000' } }, { type: 'text', data: { text: ' ' + text } }],
 });
 const actionPaths = () => actions.map((a) => a.path);
+const deleteIds = () => actions.filter((a) => a.path === '/delete_msg').map((a) => a.body.message_id);
 
 try {
   // 场景 1：私聊 react——动作发出、正文里没有标记、提示只在第一轮注入
@@ -194,13 +207,16 @@ try {
   eq('围栏内的 react 不执行，只执行 poke', actionPaths().join(','), '/friend_poke');
   await b.stop();
 
-  // 场景 3：撤回——delete_msg 的 id 必须等于发送返回的 message_id
+  // 场景 3：第一次对话就 recall——没有上一轮，不发 delete_msg，只 warn，这一轮不算失败
   b = await startBridge(16743);
-  await post(16743, priv(301, reply('这条先发再撤回[[recall]]')));
-  await waitFor(() => sends.length === 1 && actions.length === 1);
-  eq('撤回：正文不含标记', sends[0] && sends[0].body.message, '这条先发再撤回');
-  eq('撤回：调用 delete_msg', actionPaths()[0], '/delete_msg');
-  eq('撤回：删的是本轮气泡的 message_id', actions[0] && actions[0].body.message_id, sends[0] && sends[0].id);
+  await post(16743, priv(301, reply('第一次就想撤回[[recall]]')));
+  await waitFor(() => sends.length === 1 && b.log().includes('没有上一轮气泡可撤回'));
+  eq('首次 recall：正文正常送达', sends[0] && sends[0].body.message, '第一次就想撤回');
+  eq('首次 recall：不发 delete_msg', deleteIds().length, 0);
+  check('首次 recall：日志有「没有上一轮气泡可撤回」', b.log().includes('没有上一轮气泡可撤回'), b.log().slice(-300));
+  const firstPanel = await (await fetch('http://127.0.0.1:16743/panel/state.json')).json();
+  check('首次 recall：记 skipped 且本轮不失败', firstPanel.interactions.last.skipped === 1 &&
+    firstPanel.interactions.last.failed === 0 && firstPanel.counts.failed === 0, JSON.stringify(firstPanel.interactions.last));
   await b.stop();
 
   // 场景 4：纯动作回复不发空消息，但动作执行了
@@ -240,26 +256,96 @@ try {
   check('动作报错：面板记录本轮失败 1 个', panel.interactions && panel.interactions.last && panel.interactions.last.failed === 1, JSON.stringify(panel.interactions));
   await b.stop();
 
-  // 场景 7：总开关关闭——标记原样进正文，不发任何动作请求
+  // 场景 7：总开关关闭——标记原样进正文，不发任何动作请求（含 recall）
   b = await startBridge(16747, { BRIDGE_INTERACTIONS: '0' });
-  await post(16747, priv(701, reply('原样[[react:赞]]')));
-  await waitFor(() => sends.length === 1);
-  eq('关闭时：标记原样进正文', sends[0] && sends[0].body.message, '原样[[react:赞]]');
-  eq('关闭时：不发动作请求', actions.length, 0);
+  await post(16747, priv(701, reply('第一轮')));
+  await waitTurn(16747, 1);
+  check('关闭时：第一轮有气泡可记', sends[0] != null, JSON.stringify(sends));
+  await post(16747, priv(702, reply('原样[[recall]]')));
+  await waitTurn(16747, 2);
+  eq('关闭时：第二轮标记原样进正文', sends[1] && sends[1].body.message, '原样[[recall]]');
+  eq('关闭时：不发任何动作请求', actions.length, 0);
+  eq('关闭时：不删上一轮（根本没解析）', deleteIds().length, 0);
   await b.stop();
 
-  // 场景 8：撤回本轮所有气泡（分条后逐条删）
+  // 场景 8：两轮撤回——第 2 轮删第 1 轮的多条气泡，第 2 轮正文保留
+  // 旧断言（P0-1）测的是「删本轮」，正是这次要修的 bug；这里改成正确的两轮语义。
   b = await startBridge(16748, { BRIDGE_HUMANIZE: '1', BRIDGE_HUMANIZE_MAX_BUBBLES: '3', BRIDGE_HUMANIZE_MAX_CHARS: '40', BRIDGE_HUMANIZE_TOTAL_DELAY_MS: '0' });
   const longReply = '这是第一句比较长的测试内容用来撑开单条气泡的字数上限。' +
     '这是第二句比较长的测试内容用来撑开单条气泡的字数上限。' +
-    '这是第三句比较长的测试内容用来撑开单条气泡的字数上限。[[recall]]';
+    '这是第三句比较长的测试内容用来撑开单条气泡的字数上限。';
   await post(16748, priv(801, reply(longReply)));
-  await waitFor(() => sends.length >= 2 && actions.length >= sends.length);
-  const sentIds = sends.map((s) => s.id);
-  const deletedIds = actions.filter((a) => a.path === '/delete_msg').map((a) => a.body.message_id);
-  check('多条气泡都发出去了', sends.length >= 2, JSON.stringify(sends.map((s) => s.body.message)));
-  eq('每条气泡都删了', deletedIds.join(','), sentIds.join(','));
-  check('正文里没有 recall 标记', sends.every((s) => !String(s.body.message).includes('[[recall]]')), JSON.stringify(sends.map((s) => s.body.message)));
+  await waitTurn(16748, 1);
+  check('两轮撤回：第 1 轮分出了多条气泡', sends.length >= 2, JSON.stringify(sends.map((s) => s.body.message)));
+  const firstIds = sends.map((s) => s.id);
+  const firstCount = sends.length;
+  await post(16748, priv(802, reply('刚才说错了，正确的是 X。[[recall]]')));
+  await waitTurn(16748, 2);
+  const second = sends[firstCount];
+  const secondIds = sends.slice(firstCount).map((s) => s.id);
+  const deleted = deleteIds();
+  eq('两轮撤回：删的是第 1 轮的全部气泡（顺序/数量）', deleted.join(','), firstIds.join(','));
+  check('两轮撤回：第 2 轮气泡都没有被删', secondIds.length > 0 && secondIds.every((id) => !deleted.includes(id)), JSON.stringify({ secondIds, deleted }));
+  eq('两轮撤回：第 2 轮正文正常送达', second && second.body.message, '刚才说错了，正确的是 X。');
+  await b.stop();
+
+  // 场景 9：纯动作 [[recall]]（无正文）——不发空消息 + 删上一轮
+  b = await startBridge(16749);
+  await post(16749, priv(901, reply('第一轮要留着')));
+  await waitTurn(16749, 1);
+  const keepId = sends[0] && sends[0].id;
+  await post(16749, priv(902, reply('[[recall]]')));
+  await waitTurn(16749, 2);
+  eq('纯动作 recall：不发空消息', sends.length, 1);
+  eq('纯动作 recall：删的是上一轮', deleteIds().join(','), String(keepId));
+  await b.stop();
+
+  // 场景 10：上一轮是纯动作（没气泡）——本轮 recall 记 skipped，不删更早的气泡
+  b = await startBridge(16750);
+  await post(16750, priv(1001, reply('[[poke]]')));
+  await waitFor(() => actions.length === 1);
+  eq('上一轮纯动作：确实没发正文', sends.length, 0);
+  await post(16750, priv(1002, reply('现在撤回[[recall]]')));
+  await waitTurn(16750, 2);
+  eq('上一轮纯动作：本轮正文正常送达', sends[0] && sends[0].body.message, '现在撤回');
+  eq('上一轮纯动作：本轮 recall 不删任何东西', deleteIds().length, 0);
+  check('上一轮纯动作：日志有「没有上一轮气泡可撤回」', b.log().includes('没有上一轮气泡可撤回'), b.log().slice(-300));
+  const purePanel = await (await fetch('http://127.0.0.1:16750/panel/state.json')).json();
+  check('上一轮纯动作：记 skipped 而不是 failed', purePanel.interactions.last.skipped === 1 &&
+    purePanel.interactions.last.failed === 0, JSON.stringify(purePanel.interactions.last));
+  await b.stop();
+
+  // 场景 11：连续三轮——第 2 轮删第 1 轮；第 3 轮删第 2 轮（不是第 1 轮）
+  b = await startBridge(16751);
+  await post(16751, priv(1101, reply('第一轮')));
+  await waitTurn(16751, 1);
+  const id1 = sends[0] && sends[0].id;
+  await post(16751, priv(1102, reply('纠正第一轮[[recall]]')));
+  await waitTurn(16751, 2);
+  const id2 = sends[1] && sends[1].id;
+  eq('连续三轮：第 2 轮删第 1 轮', deleteIds().join(','), String(id1));
+  await post(16751, priv(1103, reply('纠正第二轮[[recall]]')));
+  await waitTurn(16751, 3);
+  const id3 = sends[2] && sends[2].id;
+  eq('连续三轮：第 3 轮删第 2 轮（累计顺序）', deleteIds().join(','), [id1, id2].join(','));
+  eq('连续三轮：第 3 轮没有回头删第 1 轮', deleteIds()[1], id2);
+  check('连续三轮：第 3 轮气泡没被删', !deleteIds().includes(id3), JSON.stringify({ id3, deleted: deleteIds() }));
+  await b.stop();
+
+  // 场景 12：recall 的 delete_msg 失败——正文仍送达，只记 warn，本轮不算失败
+  b = await startBridge(16752);
+  await post(16752, priv(1201, reply('上一轮要留着')));
+  await waitTurn(16752, 1);
+  const failId = sends[0] && sends[0].id;
+  failActions = true;
+  await post(16752, priv(1202, reply('正文照发[[recall]]')));
+  await waitTurn(16752, 2);
+  eq('撤回失败：第 2 轮正文照常送达', sends[1] && sends[1].body.message, '正文照发');
+  eq('撤回失败：确实尝试删上一轮', deleteIds().join(','), String(failId));
+  check('撤回失败：日志有「动作执行异常」', b.log().includes('动作执行异常'), b.log().slice(-400));
+  const failPanel = await (await fetch('http://127.0.0.1:16752/panel/state.json')).json();
+  check('撤回失败：只记动作失败，本轮 counts.failed 仍为 0',
+    failPanel.counts.failed === 0 && failPanel.interactions.last.failed === 1, JSON.stringify({ counts: failPanel.counts, last: failPanel.interactions.last }));
   await b.stop();
 } catch (e) {
   fail++;

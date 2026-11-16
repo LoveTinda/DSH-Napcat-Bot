@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * 目的：验证交互动作的纯解析逻辑——标记识别、围栏跳过、上限、表情映射、空白清理与提示词。
- * 边界：不连 NapCat / DSH、不发网络请求；只调用 interactions.mjs 的纯函数。
+ * 目的：验证交互动作的纯解析逻辑——标记识别、围栏跳过、上限、表情映射、空白清理、提示词，
+ *       以及 runActions 的 recall 参数（只删 prevIds，绝不删 currentIds）。
+ * 边界：不连 NapCat / DSH、不发真实网络请求；runActions 用注入的假 fetch。
  * 依赖：node: 无（只用 console）；./interactions.mjs。
  * 失败：任一断言不过 → 退出码 1，并打印失败项与期望/实际值。
  * 副作用：无。
  */
 
 import {
-  parseActions, EMOJI_IDS, interactionHint, describeInteractions,
+  parseActions, runActions, EMOJI_IDS, interactionHint, describeInteractions,
   DEFAULT_INTERACTIONS, MAX_ACTIONS_CAP,
 } from './interactions.mjs';
 
@@ -120,6 +121,8 @@ check('提示词提到 react', hint.includes('[[react:赞]]'), hint);
 check('提示词提到 recall/poke', hint.includes('[[recall]]') && hint.includes('[[poke]]'), hint);
 check('提示词提到最多 2 个', hint.includes('最多 2 个'), hint);
 check('提示词提到代码围栏不执行', hint.includes('代码围栏'), hint);
+check('提示词不再说「撤回本轮」', !hint.includes('撤回本轮'), hint);
+check('提示词说明撤回上一轮且本轮不撤', hint.includes('撤回你上一轮发出的气泡') && hint.includes('本轮正文不会被撤回'), hint);
 eq('关闭时不生成提示词', interactionHint({ enabled: false }), '');
 
 // 19. 默认值与描述
@@ -127,6 +130,29 @@ eq('默认动作上限是 2', DEFAULT_INTERACTIONS.maxActions, 2);
 eq('配置上限是 5', MAX_ACTIONS_CAP, 5);
 check('关闭时描述说明标记原样保留', describeInteractions({ enabled: false }).includes('原样保留'), describeInteractions({ enabled: false }));
 check('开启时描述包含群 poke 状态', describeInteractions({ enabled: true, groupPoke: false }).includes('群 poke 关'), describeInteractions({ enabled: true, groupPoke: false }));
+
+// 20. runActions：recall 只删 prevIds，不删 currentIds（P0-1b 的核心契约）
+const calls = [];
+const fakeFetch = async (url, opts) => {
+  calls.push({ url, body: JSON.parse(opts.body) });
+  return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: {} }) };
+};
+const recallCtx = {
+  info: { kind: 'private', userId: '20001', messageId: 1 },
+  currentIds: [9001],
+  prevIds: [8001, 8002],
+};
+const r1 = await runActions([{ kind: 'recall' }], recallCtx, { api: 'http://fake', fetchImpl: fakeFetch, timeoutMs: 1000 });
+eq('runActions recall 只删上一轮（顺序/数量）', calls.map((c) => c.body.message_id).join(','), '8001,8002');
+eq('runActions recall 不删本轮', calls.some((c) => c.body.message_id === 9001), false);
+eq('runActions recall 记为 1 个执行', r1.executed, 1);
+
+calls.length = 0;
+const r2 = await runActions([{ kind: 'recall' }], { ...recallCtx, prevIds: [] }, { api: 'http://fake', fetchImpl: fakeFetch, timeoutMs: 1000 });
+eq('没有上一轮时 recall 记 skipped', r2.skipped, 1);
+eq('没有上一轮时不发 delete_msg', calls.length, 0);
+check('没有上一轮时给出可记日志的 warn', r2.warnings.some((w) => w.includes('没有上一轮气泡可撤回')), JSON.stringify(r2));
+check('warn 里带本轮条数（currentIds 只用于日志）', r2.warnings[0] && r2.warnings[0].includes('本轮 1 条不删'), JSON.stringify(r2.warnings));
 
 console.log('\n' + pass + ' 项通过' + (fail ? '，' + fail + ' 项失败' : ''));
 process.exit(fail ? 1 : 0);

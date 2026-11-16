@@ -1,12 +1,33 @@
 # CHANGELOG
 
+## v0.2.33
+- **P0-1b 修正 `[[recall]]` 语义**：P0-1 把它做成了「删本轮气泡」，模型说
+  「正确的是 X + [[recall]]」时会把刚发的 X 也删掉。现在按聊天在内存里记
+  `lastBubbles`（上一轮气泡 id），`[[recall]]` 只删上一轮，本轮正文留在聊天里
+- 旧版 `emit()` 是「先动作、后发正文」，所以 recall 天然删上一轮；P0-1 改成了
+  「先正文、后动作」（为了动作不挡正文），必须显式把上一轮 id 传进
+  `runActions({ currentIds, prevIds })`。`currentIds` 只用于日志，不再当 recall 目标
+- 没有上一轮（第一次对话 / 刚重启 / 上一轮是纯动作）时：recall 记 skipped，
+  日志 `warn: 没有上一轮气泡可撤回`，这一轮不算失败
+- 纯动作 `[[recall]]` 不发空消息，只删上一轮；`lastBubbles` 只存内存不落盘
+  （旧 id 在 NapCat 会话结束后不可删，重启后陈旧 id 反而会报错）
+- 提示词改口：`[[recall]] 撤回你上一轮发出的气泡（用于"上一句说错了，整段纠正"）；
+  本轮正文不会被撤回。` 不再说「撤回本轮」
+- 测试：`test-interactions.mjs` 58 项（新增 runActions 只删 prevIds/不删 currentIds、
+  无上一轮 skipped）、`test-interactions-wire.mjs` 52 项（新增两轮、首次 recall、
+  纯动作 recall、上一轮纯动作、连续三轮、总关闭、delete_msg 失败等场景）。
+  **修正一条旧错断言**：P0-1 的「分条后逐条撤回」测的是「删本轮」，正是本 bug；
+  现在改为「第 1 轮分条 → 第 2 轮 recall 只删第 1 轮 id，第 2 轮正文保留」
+- 未做可选项：交互提示「已注入」标记与面板 `interactionTotals` 落盘（仍只存内存，
+  重启后每个会话重注一次、面板计数清零）
+
 ## v0.2.32
 - **P0-1 交互动作**：新增 `units/bridge/interactions.mjs`——模型在正文里写
   `[[react:赞]]` / `[[recall]]` / `[[poke]]`，桥接器执行后把标记从可见正文里删掉
 - 表情回应：给用户那条消息调 `set_msg_emoji_like`（`emoji_id` 字符串）；中文名映射
   赞=76、爱心=66、笑哭=182、鼓掌=99、疑问=32、捂脸=264，数字 ID 原样传
 - 撤回：`sendReply()` 改为返回 `data.message_id`，本轮每条气泡的 id 都收集；
-  `[[recall]]` 等正文发完后逐条 `delete_msg`（分条时也是逐条删）
+  `[[recall]]` 等正文发完后逐条 `delete_msg`（分条时也是逐条删；**v0.2.33 已修正为「删上一轮」**）
 - 戳一戳：私聊 `friend_poke`、群 `group_poke`；群默认关，打开配置才发
 - **正文优先**：先发正文、再在总时限内执行动作；动作报错/超时只记
   `warn: 动作执行异常`，正文照常送达；纯动作回复不发空消息

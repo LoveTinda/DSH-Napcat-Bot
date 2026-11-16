@@ -1,6 +1,6 @@
 /**
  * 目的：解析并执行模型写在回复正文里的交互动作标记（[[react:…]] / [[recall]] / [[poke]]），
- *       让桥接器能给用户消息加表情、撤回本轮气泡、戳一戳对方；解析时把标记从可见正文里删掉。
+ *       让桥接器能给用户消息加表情、撤回上一轮气泡、戳一戳对方；解析时把标记从可见正文里删掉。
  * 边界：只做解析与 OneBot 动作调用，不负责发正文、不保存聊天记录、不判断谁能触发；
  *       代码围栏内的标记一律不解析；每轮动作上限与总时限由调用方传入，模块自己不做重试。
  * 依赖：无第三方依赖；运行时用全局 fetch / AbortSignal（桥接器注入 api、token 与超时）。
@@ -144,7 +144,8 @@ export function interactionHint(options = {}) {
   return [
     '[小动作] 需要时可在正文里写标记，桥接器会执行并从正文里删掉，不会显示给用户：',
     '[[react:赞]] 给用户这条消息加表情（可用：赞/爱心/笑哭/鼓掌/疑问/捂脸，或数字表情 ID）；',
-    '[[recall]] 撤回本轮已发出的所有气泡；[[poke]] 戳一戳发消息的人（群里默认关闭）。',
+    '[[recall]] 撤回你上一轮发出的气泡（用于"上一句说错了，整段纠正"）；本轮正文不会被撤回。',
+    '[[poke]] 戳一戳发消息的人（群里默认关闭）。',
     '每轮最多 ' + maxActions + ' 个；代码围栏里的标记不执行。',
   ].join('\n');
 }
@@ -165,12 +166,17 @@ export function describeInteractions(options = {}) {
 }
 
 /**
- * 目的：按顺序执行动作，给用户消息加表情、撤回本轮气泡、戳一戳。
+ * 目的：按顺序执行动作，给用户消息加表情、撤回上一轮气泡、戳一戳。
  * 输入：
  *   actions   parseActions 的 actions；
- *   context   { info: { kind, userId, groupId, messageId }, messageIds: 本轮已发出的 message_id[] }；
+ *   context   {
+ *     info: { kind, userId, groupId, messageId },
+ *     currentIds: 本轮刚发出的 message_id[]（recall 不碰，只用于日志/将来扩展）,
+ *     prevIds: 上一轮发出的 message_id[]（recall 只删这些）
+ *   }；
  *   options   { api, token, groupPoke, maxActions, timeoutMs, fetchImpl }。
- * 输出：{ executed, failed, skipped, errors }；executed/failed 按「动作」计数（不是 HTTP 请求数）。
+ * 输出：{ executed, failed, skipped, errors, warnings }；executed/failed 按「动作」计数。
+ *       warnings 是「跳过但值得记日志」的原因（如没有上一轮气泡），由调用方记 warn。
  * 失败：从不抛错；每个动作单独 try/catch，错误只进 errors（调用方记 warn）。总时限到后不再发请求。
  * 副作用：向 OneBot HTTP API 发请求；不写文件、不改全局状态。
  */
@@ -181,11 +187,12 @@ export async function runActions(actions, context, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   const api = String(options.api || '').replace(/\/+$/, '');
   const info = context && context.info ? context.info : {};
-  const messageIds = context && Array.isArray(context.messageIds) ? context.messageIds : [];
+  const currentIds = context && Array.isArray(context.currentIds) ? context.currentIds : [];
+  const prevIds = context && Array.isArray(context.prevIds) ? context.prevIds : [];
   const headers = { 'content-type': 'application/json' };
   if (options.token) headers.authorization = 'Bearer ' + options.token;
 
-  const result = { executed: 0, failed: 0, skipped: 0, errors: [] };
+  const result = { executed: 0, failed: 0, skipped: 0, errors: [], warnings: [] };
   const deadline = Date.now() + timeoutMs;
 
   /** 目的：发一个 OneBot 动作请求并校验 status；失败抛错。副作用：一次本机 HTTP。 */
@@ -212,8 +219,14 @@ export async function runActions(actions, context, options = {}) {
         await call('set_msg_emoji_like', { message_id: info.messageId, emoji_id: String(action.emojiId) });
         result.executed++;
       } else if (action.kind === 'recall') {
-        const ids = [...new Set(messageIds.filter((id) => id != null && id !== ''))];
-        if (!ids.length) { result.skipped++; continue; }
+        // 撤回的是「上一轮」：P0-1b 修正。旧版 emit() 先动作后发正文，所以 recall 天然删上一轮；
+        // 现在正文优先，必须由 bridge.mjs 把上一轮 id 传进来，绝不能删 currentIds（否则把 X 也删了）。
+        const ids = [...new Set(prevIds.filter((id) => id != null && id !== ''))];
+        if (!ids.length) {
+          result.skipped++;
+          result.warnings.push('没有上一轮气泡可撤回（本轮 ' + currentIds.length + ' 条不删）');
+          continue;
+        }
         for (const id of ids) await call('delete_msg', { message_id: id });
         result.executed++;
       } else if (action.kind === 'poke') {
