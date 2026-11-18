@@ -1,16 +1,26 @@
 # CHANGELOG
 
-## 未发版
+## v0.2.37
 
-- 新增 `bin/mount-probe.sh`：刷前最小挂载探针。默认只验证 `unshare -m` 与
-  `mount --make-rprivate`，**不创建挂载**；`--mount` 才在私有 namespace 里做一次
-  bind/remount/umount。退出时检查宿主 `mountinfo` 无残留；失败关闭，只卸载自己建的路径。
-- 用途：在真机 root 下回答「这台能不能走 chroot」，不再靠猜；不改变模块运行时行为。
-  proot 里 remount 会被拦截，结果不可信。v0.2.36 的 zip 未重打，先单独用下载目录里的脚本。
-- 新增 `bin/prop-probe.sh`：当 `--make-rprivate` 失败时，逐个尝试 toybox 的
-  `-o rprivate`/`-o remount,rprivate`/`-o private` 等写法，打印原始报错和
-  `/proc/self/mountinfo` 的根传播标志。只在私有 namespace 里改标志，不创建挂载；
-  只有 `after` 行没有 `shared:` 的候选才可能继续 chroot。
+- **真机反馈修复**：v0.2.36 的探针在 Android toybox 上确认 namespace 隔离成功，但
+  `mount --make-rprivate` 不可用（toybox 不认 util-linux 的 `--make-*` 写法），
+  导致 chroot 被保守拒绝
+- 新增 `bin/make-private.sh`：chroot 前把当前 namespace 的传播设为「不回传宿主」。
+  依次尝试 `--make-rprivate`、`-o remount,rprivate`、`-o rprivate`、
+  `-o remount,private`、`-o private`；每一步后检查 `/proc/self/mountinfo`
+  全树没有 `shared:` 才继续；否则退出 1
+- toybox 的 `-o rprivate` 实际映射为 `MS_SLAVE|MS_REC`（不是严格 private），
+  helper 只把它当「无 shared 的 slave 回退」，日志会写 warn；安全性依赖
+  「没有 shared 传播」，不是私有权限本身
+- `unit.sh` 的 `chroot_usable()` 与 `spawn_chroot()` 都改为：`unshare -m` 后
+  先校验子进程 namespace id 确实变了，再调用 helper；删掉 `--make-private` 单层回退；
+  helper 失败/仍有 shared 一律 exit 78。`auto` 探针不过时仍退回 exec
+- `mount-probe.sh` 改为调用同一 helper；默认仍不创建挂载，`--mount` 才 bind/remount。
+  新增 `prop-probe.sh` 仅用于打印各候选的原始报错和 `mountinfo`，不参与运行时
+- 版本：v0.2.37 / versionCode 42
+- 验证：shell `sh -n`、check-headers、check-module（0 FAIL/1 warn）、selftest；
+  proot 下探针在 namespace 校验处失败关闭、宿主无残留。**真机上的 helper 回退
+  尚未验证**；如果 `-o` 写法也不可用，仍会退回 exec，不会在宿主留挂载
 
 ## v0.2.36
 - **启动/挂载安全重写（事故修复）**：v0.2.35 刷入后出现开机卡很久、系统服务/应用起不来。

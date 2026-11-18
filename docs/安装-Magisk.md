@@ -22,47 +22,46 @@
 ```sh
 cd /root/workspace/tinda-bot
 sh bin/check-module.sh      # 结构门禁：module.prop / shebang / CRLF / service.sh
-sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.36-magisk.zip
+sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.37-magisk.zip
 ```
 
 包内只含运行需要的东西（`module.prop`、四个脚本、`bin/ units/ contracts/ etc/ docs/` 与根文档），
 不含 `.runtime/`、`.git`、`originals/`、`local/`。当前产物：
 
-- `tinda-bot-v0.2.36-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
-- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.36-magisk.zip.sha256`（在 zip 所在目录）
+- `tinda-bot-v0.2.37-magisk.zip`（约 340 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
+- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.37-magisk.zip.sha256`（在 zip 所在目录）
 - 同目录有 `.sha256`，刷之前核一下
 
 ## 1.5 刷之前先跑最小挂载探针
 
-不确定这台的 `unshare`/`mount` 行不行，先跑 `bin/mount-probe.sh`。**默认不创建任何挂载**，
-只在一个临时目录里验证 `unshare -m` 与 `mount --make-rprivate`：
+不确定这台的 `unshare`/`mount` 行不行，先跑 `bin/mount-probe.sh`。**默认不创建任何挂载**：
+先确认 `unshare -m` 真的换了 namespace，再调用同目录的 `make-private.sh` 把传播设为
+不回传宿主；`--make-rprivate` 不可用时，helper 会试 toybox 的 `-o rprivate` 等写法，
+并检查 `mountinfo` 全树没有 `shared:` 才继续。
+
+探针需要同目录有 helper；Download 里已放好两个文件：
+`tinda-mount-probe.sh` 与 `tinda-make-private.sh`。
 
 ```sh
 su -c 'sh /sdcard/Download/DSH-Go/tinda-mount-probe.sh'
 ```
 
-- `PASS`：私有 namespace 可用；再跑 `--mount` 验证 bind/只读 remount：
+- `PASS`：传播已确认不回传宿主；再跑 `--mount` 验证 bind/只读 remount：
   `su -c 'sh /sdcard/Download/DSH-Go/tinda-mount-probe.sh --mount'`
-- `SKIP 没有 unshare`：这台不能走 chroot；`TYPE=exec` 照常能用，不影响开机。
-- `FAIL`：不要手动起 `chroot` 单元；把 `bridge`/`web` 的 `TYPE` 改为 `exec`
-  （宿主直装）最稳妥，不影响开机。
+- `SKIP`：缺 root/unshare/helper；这台不能走 chroot，`TYPE=exec` 照常用。
+- `FAIL`：不要手动起 `chroot`；把 `bridge`/`web` 的 `TYPE` 改为 `exec` 最稳。
 
 脚本默认只写 `/data/local/tmp` 下的临时目录（不可写才退回 `/tmp`）；`--mount` 的挂载
 全在 `unshare -m` 子进程里，退出即销毁，并检查宿主 `mountinfo` 有没有残留。
-proot 里 namespace id 不变，会保守失败，结果不可信；必须在 `su -c` 的真机 root 下跑。若 `su` 读不到 `/sdcard`，先复制再跑：
+proot 里 namespace id 不变，会保守失败；必须在 `su -c` 的真机 root 下跑。若 `su` 读不到
+`/sdcard`，把两个文件一起复制再跑：
 
 ```sh
-su -c 'cp /sdcard/Download/DSH-Go/tinda-mount-probe.sh /data/local/tmp/ && sh /data/local/tmp/tinda-mount-probe.sh'
+su -c 'cp /sdcard/Download/DSH-Go/tinda-mount-probe.sh /sdcard/Download/DSH-Go/tinda-make-private.sh /data/local/tmp/ && sh /data/local/tmp/tinda-mount-probe.sh'
 ```
 
-如果报「不支持 make-rprivate」，先别改 `TYPE=chroot`。可再跑传播诊断，确认这台 toybox
-到底支持哪种写法（同样不创建挂载）：
-
-```sh
-su -c 'sh /sdcard/Download/DSH-Go/tinda-prop-probe.sh'
-```
-
-只有输出里 `after` 行**没有 `shared:`** 的候选，才可能用于 chroot；否则保持 exec。
+如果仍报传播失败，再跑 `tinda-prop-probe.sh` 看原始报错；它只打印候选和 `mountinfo`，
+不创建挂载。**只有 after 行没有 `shared:` 的候选才可能用于 chroot。**
 
 ## 2. 刷入
 
@@ -70,10 +69,10 @@ su -c 'sh /sdcard/Download/DSH-Go/tinda-prop-probe.sh'
 
 ```sh
 # Magisk
-su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.36-magisk.zip'
+su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.37-magisk.zip'
 
 # KernelSU / SukiSU（同一个模块格式，目录也是 /data/adb/modules）
-su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.36-magisk.zip'
+su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.37-magisk.zip'
 ```
 
 也可以直接在 Magisk / KernelSU / SukiSU 的 App 里：**模块** → **从本地安装** → 选 zip → 重启。
@@ -181,7 +180,11 @@ chroot 启动时 `unit.sh` 会在**私有 mount namespace** 里挂：`/proc`、`
 模块代码（只读）、`etc/state/logs/run/secrets` 五个状态目录。**不再 bind `/data/adb`、不挂 `/sdcard`**；
 宿主路径用符号链接映射，namespace 退出即销毁，不会在宿主留下递归挂载。
 
-挂载前会先做 `unshare -m` + `mount --make-rprivate` 探针；探针不通过就退回 exec，不硬上。
+挂载前会先做 `unshare -m`，校验子进程 namespace id 确实变了，再调 `bin/make-private.sh`：
+优先 `--make-rprivate`；toybox 不认时依次试 `-o remount,rprivate`/`-o rprivate`/
+`-o remount,private`/`-o private`，每一步后要求 `mountinfo` 全树没有 `shared:`。
+都失败就退回 exec；显式 chroot 直接 exit 78。toybox 可能把 `-o rprivate` 映射成 slave
+（不是严格 private），所以日志会有 warn；这里的安全依据是「没有 shared，挂载不回传宿主」。
 如果 `mountpoint -q /data/adb/tinda-bot/rootfs/data/adb` 还是真（旧版挂载没随重启清掉），
 直接拒绝启动并提示先重启，不再叠一层。
 

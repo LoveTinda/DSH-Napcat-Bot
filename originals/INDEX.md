@@ -130,3 +130,8 @@
 - 目录：originals/20261118-174103-add-mount-probe
 - 清单：SHA256SUMS
 
+## 20261118-230451 — mount-propagation-fallback
+- 文件数：112
+- 目录：originals/20261118-230451-mount-propagation-fallback
+- 清单：SHA256SUMS
+

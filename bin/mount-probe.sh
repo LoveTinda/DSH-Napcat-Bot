@@ -2,7 +2,7 @@
 # 目的：用最小动作验证 chroot 方案依赖的挂载能力，回答「这台的 unshare/mount 到底行不行」。
 # 边界：默认只验证 namespace 与私有传播，不创建任何挂载；--mount 才在私有 namespace 里做一次
 #       bind/remount/umount。两种情况都不碰 /data/adb、模块、服务、/system。
-# 依赖：root、unshare、mount、umount；Android toybox 或 Magisk busybox 自带。
+# 依赖：root、unshare、mount、umount，以及同目录的 make-private.sh / tinda-make-private.sh。
 # 输入：无参数=只读探测；--mount=额外验证 bind 与只读 remount；TMPBASE 可指定临时根。
 # 失败：0=通过；2=环境不支持/未 root（跳过，不改系统）；3=能力验证失败。
 # 副作用：默认只在临时目录写一个文件；--mount 的挂载全在 unshare -m 子进程内，退出即销毁。
@@ -49,6 +49,9 @@ UNSHARE=$(command -v unshare 2>/dev/null || true)
 command -v mount >/dev/null 2>&1 && command -v umount >/dev/null 2>&1 || skip "缺少 mount/umount"
 
 SH=/system/bin/sh
+HELPER=$(dirname "$0")/make-private.sh
+[ -f "$HELPER" ] || HELPER=$(dirname "$0")/tinda-make-private.sh
+[ -f "$HELPER" ] || skip "缺 make-private.sh（和探针放同一目录）"
 [ -x "$SH" ] || SH=$(command -v sh 2>/dev/null || true)
 [ -n "$SH" ] || skip "找不到 sh"
 
@@ -75,12 +78,10 @@ now=$(readlink /proc/self/ns/mnt 2>/dev/null || true)
 [ -n "$now" ] || { say "FAIL  读不到子进程 namespace id，拒绝 mount"; exit 19; }
 [ "$now" != "${PROBE_NS:-}" ] || { say "FAIL  仍在宿主 mount namespace，拒绝 mount"; exit 11; }
 say "ok    已进入新 mount namespace"
-# 必须是递归私有：只把 / 设为 private，已有 shared 子挂载仍可能把新挂载传回宿主。
-if ! mount --make-rprivate / 2>/dev/null; then
-  say "FAIL  不支持 make-rprivate（只 make-private 不足以保证递归私有）"
-  exit 12
-fi
-say "ok    递归私有挂载传播已建立"
+# 不要求 toybox 支持 --make-rprivate：helper 会试多种写法，但必须确认无 shared 才返回 0。
+[ -f "$HELPER" ] || { say "FAIL  缺 make-private.sh"; exit 12; }
+"$SH" "$HELPER" || { say "FAIL  无法建立不回传宿主的传播"; exit 12; }
+say "ok    传播已确认不回传宿主"
 
 [ "${MOUNT_TEST:-0}" = 1 ] || { say "ok    只读探测结束，未创建挂载"; exit 0; }
 
@@ -105,7 +106,7 @@ say "ok    卸载后目录已恢复"
 exit 0
 '
 
-PROBE_NS="$PNS" SRC="$SRC" DST="$DST" MOUNT_TEST="$MOUNT_TEST" "$UNSHARE" -m "$SH" -c "$CHILD"
+PROBE_NS="$PNS" SRC="$SRC" DST="$DST" MOUNT_TEST="$MOUNT_TEST" HELPER="$HELPER" SH="$SH" "$UNSHARE" -m "$SH" -c "$CHILD"
 rc=$?
 case $rc in
   0) say "ok    子进程全部通过" ;;

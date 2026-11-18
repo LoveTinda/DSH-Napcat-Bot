@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # 目的：**唯一**的单元管理入口。每个单元由 units/<name>/unit.conf 声明，行为完全一致。
 # 边界：不实现业务；不认识任何具体单元的名字；不跨单元读写。
-# 依赖：units/*/unit.conf、bin/lib.sh、POSIX sh 与进程信号。
+# 依赖：units/*/unit.conf、bin/lib.sh、bin/make-private.sh、POSIX sh 与进程信号。
 # 输入：start|stop|restart|status|logs <unit> [行数]
 # 失败：单元未声明/入口缺失 → 78；外部单元不可 start → 明确拒绝。
 # 副作用：写本单元的 PID/日志/状态目录（绝不碰别人的）。
@@ -81,14 +81,22 @@ find_unit_pids() {
 # 目的：判断当前 Android 环境有没有 unshare；没有就不进 chroot，避免挂载泄漏。
 has_unshare() { command -v unshare >/dev/null 2>&1; }
 
-# 目的：在真正挂载前做一次最小探针：unshare 可用、能建私有传播。
+# 目的：在真正挂载前做一次最小探针：unshare 可用、namespace 真的换了、传播能设为不回传宿主。
 # 失败：返回非 0，调用方退回 exec；不创建任何业务挂载。
 chroot_usable() {
   has_unshare || return 1
   command -v chroot >/dev/null 2>&1 || return 1
+  [ -f "$MODDIR/bin/make-private.sh" ] || return 1
   _sh=/system/bin/sh
   [ -x "$_sh" ] || _sh=sh
-  "$(command -v unshare)" -m "$_sh" -c 'mount --make-rprivate / 2>/dev/null' >/dev/null 2>&1
+  _pns=$(readlink /proc/self/ns/mnt 2>/dev/null) || return 1
+  [ -n "$_pns" ] || return 1
+  MODDIR="$MODDIR" PROBE_NS="$_pns" "$(command -v unshare)" -m "$_sh" -c '
+    now=$(readlink /proc/self/ns/mnt 2>/dev/null) || exit 1
+    [ -n "$now" ] && [ "$now" != "$PROBE_NS" ] || exit 1
+    [ -f "$MODDIR/bin/make-private.sh" ] || exit 1
+    "$MODDIR/bin/make-private.sh" >/dev/null 2>&1
+  '
 }
 
 resolve_mode() {
@@ -97,7 +105,7 @@ resolve_mode() {
     exec|external) echo "$TYPE" ;;
     chroot) echo "chroot:$_rf" ;;
     auto)
-      # 判据是「Android root + 有 rootfs + unshare 能建私有传播」；proot 里 /data/adb 不存在，自然退回 exec。
+      # 判据是「Android root + 有 rootfs + unshare/namespace/传播探针通过」；proot 里 /data/adb 不存在，自然退回 exec。
       if [ -d /data/adb ] && [ -d "$_rf/usr" ] && chroot_usable; then echo "chroot:$_rf"; else echo "exec"; fi ;;
   esac
 }
@@ -123,7 +131,9 @@ spawn_chroot() {
   _unshare=$(command -v unshare)
   _sh=/system/bin/sh
   [ -x "$_sh" ] || _sh=sh
-  MODDIR="$MODDIR" DATA="$DATA" TINDA_RF="$_rf" TINDA_MODDIR="$MODDIR" TINDA_DATA="$DATA" TINDA_CMD="$CMD" TINDA_NAME="$NAME" \
+  _pns=$(readlink /proc/self/ns/mnt 2>/dev/null) || { log error "$NAME: 读不到 mount namespace，拒绝 chroot"; return 78; }
+  [ -n "$_pns" ] || { log error "$NAME: 读不到 mount namespace，拒绝 chroot"; return 78; }
+  MODDIR="$MODDIR" DATA="$DATA" TINDA_RF="$_rf" TINDA_MODDIR="$MODDIR" TINDA_DATA="$DATA" TINDA_CMD="$CMD" TINDA_NAME="$NAME" TINDA_NS="$_pns" \
     "$_unshare" -m "$_sh" -c '
       set -eu
       rf=$TINDA_RF
@@ -132,13 +142,18 @@ spawn_chroot() {
       cmd=$TINDA_CMD
       name=$TINDA_NAME
 
-      # 私有挂载传播：子进程退出时 namespace 销毁，挂载不会留在宿主。
-      if ! mount --make-rprivate / 2>/dev/null; then
-        if ! mount --make-private / 2>/dev/null; then
-          echo "[$name] 无法建立私有挂载传播，拒绝 chroot" >&2
-          exit 78
-        fi
-      fi
+      # 先证明真的换了 namespace，再改传播/挂载；证明不了就失败关闭。
+      now=$(readlink /proc/self/ns/mnt 2>/dev/null) || {
+        echo "[$name] 读不到子进程 mount namespace，拒绝 chroot" >&2; exit 78; }
+      [ -n "$now" ] && [ "$now" != "$TINDA_NS" ] || {
+        echo "[$name] 仍在宿主 mount namespace，拒绝 chroot" >&2; exit 78; }
+
+      # 不要求 toybox 支持 --make-rprivate：helper 会试多种写法，
+      # 但必须确认全树没有 shared 传播才返回 0。
+      [ -f "$mod/bin/make-private.sh" ] || {
+        echo "[$name] 缺 bin/make-private.sh，拒绝 chroot" >&2; exit 78; }
+      "$mod/bin/make-private.sh" || {
+        echo "[$name] 无法建立不回传宿主的传播，拒绝 chroot" >&2; exit 78; }
 
       # 只清私有 namespace 里从父进程继承的同名挂载；不影响宿主。
       for m in "$rf/proc" "$rf/dev" "$rf/sys" "$rf/opt/tinda-bot" "$rf/var/tinda"; do

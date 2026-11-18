@@ -59,9 +59,14 @@ check_root() {
   grep -q 'sys.boot_completed' "$root/service.sh" && fail "service.sh 仍在等 sys.boot_completed（会拖开机）"
   grep -q 'sleep 20' "$root/service.sh" && fail "service.sh 仍有 sleep 20（会拖开机）"
   grep -q 'unit.sh' "$root/service.sh" || note "service.sh 没给手动启动示例"
-  # chroot 必须有私有 namespace，且不得再 bind /data/adb 祖先。
+  # chroot 必须有 namespace 校验 + 传播 helper，且不得再 bind /data/adb 祖先。
   grep -q 'unshare' "$root/bin/unit.sh" || fail "unit.sh 缺 unshare（chroot 会泄漏挂载）"
-  grep -q 'make-rprivate' "$root/bin/unit.sh" || fail "unit.sh 缺 make-rprivate（挂载会往宿主传播）"
+  grep -q 'TINDA_NS' "$root/bin/unit.sh" || fail "unit.sh 缺 namespace 校验（可能没隔离就 mount）"
+  grep -q 'make-private.sh' "$root/bin/unit.sh" || fail "unit.sh 没调用 make-private.sh（传播可能回传宿主）"
+  [ -f "$root/bin/make-private.sh" ] || fail "缺 bin/make-private.sh"
+  grep -q 'rprivate' "$root/bin/make-private.sh" || fail "make-private.sh 没试 rprivate"
+  grep -q 'shared:' "$root/bin/make-private.sh" || fail "make-private.sh 没检查 shared 残留"
+  grep -q 'mount --make-private' "$root/bin/unit.sh" && fail "unit.sh 仍有 make-private 回退（递归私有不成立）"
   grep -q 'mount -o bind /data/adb' "$root/bin/unit.sh" && fail "unit.sh 仍在 bind /data/adb（递归挂载）"
   grep -q '^TYPE=exec' "$root/units/napcat/unit.conf" || fail "napcat 必须是 TYPE=exec（Android QQ 不能进 glibc rootfs）"
   grep -q 'MODPATH' "$root/customize.sh" || note "customize.sh 没用到 MODPATH（安装期路径可能取错）"
@@ -80,7 +85,7 @@ if [ "${1:-}" = "--selftest" ]; then
   trap 'rm -rf "$tmp"' EXIT INT TERM
   mkdir -p "$tmp/bin" "$tmp/units/napcat" "$tmp/etc"
   cp "$MODDIR/module.prop" "$MODDIR/service.sh" "$MODDIR/customize.sh" "$MODDIR/uninstall.sh" "$tmp/"
-  cp "$MODDIR/bin/unit.sh" "$MODDIR/bin/lib.sh" "$tmp/bin/"
+  cp "$MODDIR/bin/unit.sh" "$MODDIR/bin/lib.sh" "$MODDIR/bin/make-private.sh" "$tmp/bin/"
   cp "$MODDIR/units/napcat/unit.conf" "$tmp/units/napcat/"
   cp "$MODDIR/etc/tinda.conf.example" "$tmp/etc/"
   chmod +x "$tmp"/*.sh "$tmp"/bin/*.sh
