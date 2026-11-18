@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v0.3.7
+
+- **模块页直接「打开」**：新增 `webroot/index.html`，KernelSU / APatch 的模块卡片会多出
+  「打开」按钮，点进去就是状态页（版本、`AUTO_START`、web 运行态、地址、token 复制、
+  证书到期、三个下游在线、`web.log` 末尾），并带「启动 / 停止 / 重启 / 打开控制台 / 刷新」
+- 页面通过 KernelSU 的 `ksu.exec` 读真实状态、调 `unit.sh`；「打开控制台」用 `am start`
+  交给系统浏览器（自签证书在内嵌 WebView 里过不了，不如交给浏览器）
+- Magisk 没有 webroot 容器，仍走「操作」按钮 → `action.sh` → 浏览器打开 `/module/`
+- 版本：v0.3.7 / versionCode 56
+- 验证：webroot 脚本过 `node --check`；`check-module` 增加 webroot 与页面文件的硬性检查；
+  zip 内含 `webroot/index.html` 且打包脚本已纳入该目录
+
 ## v0.3.6
 
 - **新增模块信息页 `/module/`**（要 token）：版本/版本码、安装与数据目录、`AUTO_START`、

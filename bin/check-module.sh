@@ -69,6 +69,7 @@ check_root() {
   grep -q 'unit.sh' "$root/service.sh" || note "service.sh 没给手动启动示例"
   grep -q '^AUTO_START=' "$root/etc/tinda.conf.example" || fail "tinda.conf.example 缺 AUTO_START"
   # 模块信息页：页面文件、网关路由、网关拿得到数据路径，缺一件就是白屏。
+  [ -f "$root/webroot/index.html" ] || fail "缺 webroot/index.html（KernelSU/APatch 模块页的「打开」按钮）"
   [ -f "$root/units/web/ui/module.html" ] || fail "缺 units/web/ui/module.html（模块信息页）"
   grep -q '/module/data.json' "$root/units/web/gateway.mjs" || fail "网关没有 /module/ 路由"
   grep -q 'TINDA_DATA' "$root/bin/run-web.sh" || fail "run-web.sh 没把 TINDA_DATA 传给网关"

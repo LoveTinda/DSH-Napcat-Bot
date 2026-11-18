@@ -102,8 +102,10 @@ KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子）
 
 默认 `AUTO_START=web`：刷完重启，控制台自己就起来。
 
-不想等重启、或面板没起来时：Magisk → 模块 → **Tinda Bot → 操作**（KernelSU 里是同样的
-action 按钮）。`action.sh` 会起一次 `web`，然后把地址和 token 直接打出来：
+不想等重启、或面板没起来时：**KernelSU / APatch** 点模块卡片上的 **打开**（模块自带
+`webroot/index.html`，进去是状态页：版本、web 地址/token、单元、日志，带启停按钮）；
+**Magisk** 没有 webroot 容器，点 **Tinda Bot → 操作**，`action.sh` 会起 web 并用浏览器打开
+同一份信息的网页版 `/module/`。`action.sh` 会起一次 `web`，然后把地址和 token 直接打出来：
 
 ```
 控制台：https://192.168.1.3:8443/?k=<token>
