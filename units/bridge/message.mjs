@@ -27,16 +27,17 @@ const TYPE_NAMES = {
  */
 export function normalizeMessage(message, selfId = '') {
   if (typeof message === 'string') {
-    return { text: message.trim(), mentioned: false, repliedTo: null, unsupported: [], images: 0 };
+    return { text: message.trim(), mentioned: false, repliedTo: null, unsupported: [], images: 0, imageSources: [] };
   }
   if (!Array.isArray(message)) {
-    return { text: '', mentioned: false, repliedTo: null, unsupported: [], images: 0 };
+    return { text: '', mentioned: false, repliedTo: null, unsupported: [], images: 0, imageSources: [] };
   }
   const out = [];
   const unsupported = [];
   let mentioned = false;
   let repliedTo = null;
   let images = 0;
+  const imageSources = [];
   for (const seg of message) {
     if (!seg || typeof seg !== 'object') continue;
     const data = seg.data && typeof seg.data === 'object' ? seg.data : {};
@@ -44,10 +45,13 @@ export function normalizeMessage(message, selfId = '') {
       case 'text':
         if (typeof data.text === 'string') out.push(data.text);
         break;
-      case 'image':
+      case 'image': {
         images++;
+        const src = data.url || data.file || '';
+        if (src) imageSources.push(String(src));
         out.push('[图片]');
         break;
+      }
       case 'face':
       case 'mface':
         out.push('[表情]');
@@ -85,6 +89,7 @@ export function normalizeMessage(message, selfId = '') {
     repliedTo,
     unsupported: [...new Set(unsupported)],
     images,
+    imageSources,
   };
 }
 

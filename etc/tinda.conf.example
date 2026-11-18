@@ -84,6 +84,18 @@ BRIDGE_AI_DISCLOSURE=1
 # 群会话范围：group = 每群一条；member = 每个成员一条（上下文互相隔离）。
 BRIDGE_GROUP_SESSION_SCOPE=group
 
+# ---- 图片落盘（P0-3）----
+# 收到图片先下载到 $DATA/state/bridge/images，再把本机路径交给模型查看。0 = 只留 [图片] 占位。
+BRIDGE_DOWNLOAD_IMAGES=1
+# 单张上限（字节，1024–52428800；默认 10MB）
+BRIDGE_IMAGE_MAX_BYTES=10485760
+# 每轮最多下载几张（1–20）
+BRIDGE_IMAGE_MAX_COUNT=8
+# 单张下载超时（毫秒，1000–30000）
+BRIDGE_IMAGE_TIMEOUT_MS=8000
+# 是否允许图片地址解析到私网/回环；默认 0。只有 NapCat 图片走内网时才打开（会削弱 SSRF 防线）。
+BRIDGE_IMAGE_ALLOW_PRIVATE_HOSTS=0
+
 # ---- 输出档位与自动压缩（⑤）----
 # 默认档位：minimalist（只发总结）/ concise / detailed / complete
 BRIDGE_OUTPUT_DEFAULT=minimalist

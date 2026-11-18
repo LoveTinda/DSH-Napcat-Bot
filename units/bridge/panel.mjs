@@ -298,6 +298,13 @@ function renderOverview(s) {
   // 消息层（P0-2）：群回复 @、首次披露、群会话隔离；只显示策略，不含聊天内容。
   const ml = s.messageLayer || {};
   row('消息层', ml.summary || '未知');
+
+  // 图片落盘（P0-3）：只显示目录在不在、上限与累计成功/失败数，不显示图片内容。
+  const im = s.images || {};
+  const imt = im.totals || {};
+  row('图片落盘', (im.summary || '未知') +
+    (imt.downloaded || imt.failed ? ' · 成功 ' + imt.downloaded + ' / 失败 ' + imt.failed : ''),
+  imt.failed ? 'warn' : '');
 }
 
 function renderSessions(s) {
@@ -365,6 +372,7 @@ function renderConfig(s) {
     ['行为', ['BRIDGE_BACKEND', 'BRIDGE_ALLOW_GROUP', 'BRIDGE_TIMEOUT_MS', 'BRIDGE_PERMISSION_MODE']],
     ['交互动作', ['BRIDGE_INTERACTIONS', 'BRIDGE_INTERACTIONS_GROUP_POKE', 'BRIDGE_INTERACTIONS_MAX', 'BRIDGE_INTERACTIONS_TIMEOUT_MS']],
     ['消息层', ['BRIDGE_GROUP_REPLY_AT', 'BRIDGE_AI_DISCLOSURE', 'BRIDGE_GROUP_SESSION_SCOPE']],
+    ['图片落盘', ['BRIDGE_DOWNLOAD_IMAGES', 'BRIDGE_IMAGE_DIR', 'BRIDGE_IMAGE_MAX_BYTES', 'BRIDGE_IMAGE_MAX_COUNT', 'BRIDGE_IMAGE_TIMEOUT_MS', 'BRIDGE_IMAGE_ALLOW_PRIVATE_HOSTS']],
     ['DSH', ['DSH_BIN', 'DSH_HOME']],
     ['回发与告警', ['BRIDGE_MAX_EVENT_AGE_SEC', 'BRIDGE_SEEN_FILE', 'BRIDGE_SEND_RETRY', 'BRIDGE_SEND_DRAIN_MS', 'BRIDGE_OUTBOX_TTL_MS', 'BRIDGE_OUTBOX_FILE', 'ALERT_QQ', 'ALERT_FAIL_STREAK', 'ALERT_COOLDOWN_SEC', 'DISK_ALERT_PERCENT']],
   ];

@@ -20,6 +20,9 @@ const NAPCAT_PORT = 13001;
 
 const sent = [];        // 所有收到的回发请求（含失败尝试）
 const delivered = [];   // 真正返回 ok 的请求
+const imageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tinda-img-'));
+// 1x1 PNG，够通过 content-type/落盘校验，不需要真图片。
+const TINY_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nGQAAAAASUVORK5CYII=', 'base64');
 const failPlan = new Map(); // userId/groupId → 还要失败几次
 const blocked = new Set();  // userId/groupId → 一直失败（模拟断网）
 const mock = http.createServer((req, res) => {
@@ -28,6 +31,22 @@ const mock = http.createServer((req, res) => {
   req.on('end', () => {
     let body = {};
     try { body = JSON.parse(raw || '{}'); } catch {}
+    // 图片下载：/img.png 返回真 PNG，/bad.png 404，/html.png 返回错误类型。
+    if (req.url === '/img.png') {
+      res.writeHead(200, { 'content-type': 'image/png', 'content-length': TINY_PNG.length });
+      res.end(TINY_PNG);
+      return;
+    }
+    if (req.url === '/bad.png') {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    if (req.url === '/html.png') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html></html>');
+      return;
+    }
     // 引用回复会先调 get_msg；这里按 id 返回固定消息，且不计入 sent（它不是回发）。
     if (req.url === '/get_msg') {
       const qid = String(body.message_id ?? '');
@@ -124,6 +143,10 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     BRIDGE_POLICY_FILE: policyFile,
     // 非法值必须回退到 group，而不是把 key 拼坏。
     BRIDGE_GROUP_SESSION_SCOPE: 'bogus',
+    // 图片落盘：测试服务器在 127.0.0.1，必须显式允许私网；生产默认是 0。
+    BRIDGE_DOWNLOAD_IMAGES: '1',
+    BRIDGE_IMAGE_DIR: imageDir,
+    BRIDGE_IMAGE_ALLOW_PRIVATE_HOSTS: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -216,6 +239,50 @@ await post({
 const pokeReply = await waitFor(() => sent.slice(pokeMark).find((s) => s.path === '/send_private_msg'));
 check('戳一戳进入提示词', Boolean(pokeReply) && String(pokeReply.body.message).includes('[戳一戳]'),
   JSON.stringify(pokeReply && pokeReply.body));
+
+// 5.1b) 图片：下载到 imageDir，把本机路径交给模型
+const imgMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20026,
+  message_id: 77,
+  message: [{ type: 'image', data: { url: `http://127.0.0.1:${NAPCAT_PORT}/img.png` } }],
+});
+const imgReply = await waitFor(() => sent.slice(imgMark).find((s) => s.path === '/send_private_msg'));
+check('图片落盘：提示模型图片路径', Boolean(imgReply) && String(imgReply.body.message).includes('本轮附带 1 张图片'),
+  JSON.stringify(imgReply && imgReply.body));
+check('图片落盘：路径在本机 images 目录', Boolean(imgReply) && String(imgReply.body.message).includes(imageDir),
+  JSON.stringify(imgReply && imgReply.body));
+await wait(200);
+const downloaded = fs.readdirSync(imageDir).filter((f) => f.endsWith('.png'));
+check('图片落盘：文件真的写入了', downloaded.length === 1, JSON.stringify(fs.readdirSync(imageDir)));
+if (downloaded.length === 1) {
+  const st = fs.statSync(path.join(imageDir, downloaded[0]));
+  check('图片落盘：文件权限 0600', (st.mode & 0o777) === 0o600, st.mode.toString(8));
+  check('图片落盘：目录权限 0700', (fs.statSync(imageDir).mode & 0o777) === 0o700,
+    fs.statSync(imageDir).mode.toString(8));
+}
+
+// 5.1c) 图片 404：正文前明确说没读到，不让模型假装看过
+const imgBadMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20027,
+  message_id: 78,
+  message: [{ type: 'image', data: { url: `http://127.0.0.1:${NAPCAT_PORT}/bad.png` } }],
+});
+const imgBadReply = await waitFor(() => sent.slice(imgBadMark).find((s) => s.path === '/send_private_msg'));
+check('图片 404：正文提示没读到', Boolean(imgBadReply) && String(imgBadReply.body.message).includes('图片没能读取'),
+  JSON.stringify(imgBadReply && imgBadReply.body));
+
+// 5.1d) 图片 content-type 不是图片：拒绝落盘
+const imgHtmlMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20028,
+  message_id: 79,
+  message: [{ type: 'image', data: { url: `http://127.0.0.1:${NAPCAT_PORT}/html.png` } }],
+});
+const imgHtmlReply = await waitFor(() => sent.slice(imgHtmlMark).find((s) => s.path === '/send_private_msg'));
+check('图片类型不对：提示没读到', Boolean(imgHtmlReply) && String(imgHtmlReply.body.message).includes('图片没能读取'),
+  JSON.stringify(imgHtmlReply && imgHtmlReply.body));
 
 // 5.2) 只发语音：明确回“暂不支持”，不烧 DSH 回合
 const unsupMark = sent.length;
@@ -361,6 +428,7 @@ check('补发只送达一次', delivered.filter((d) => d.id === '20007').length 
 bridge.kill('SIGTERM');
 mock.close();
 await wait(300);
+fs.rmSync(imageDir, { recursive: true, force: true });
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} 通过`);

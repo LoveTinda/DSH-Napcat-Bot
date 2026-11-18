@@ -40,6 +40,9 @@ import {
   normalizeMessage, chatKeyFor, formatQuoteContext, unsupportedReply, unsupportedTaskNote,
   disclosureText, atPrefix,
 } from './message.mjs';
+import {
+  assertPublicHttpUrl, imageExtension, imageContext, imageErrorNote, DEFAULT_IMAGE,
+} from './image.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -102,6 +105,14 @@ const cfg = {
   groupReplyAt: process.env.BRIDGE_GROUP_REPLY_AT !== '0',
   aiDisclosure: process.env.BRIDGE_AI_DISCLOSURE !== '0',
   groupSessionScope: process.env.BRIDGE_GROUP_SESSION_SCOPE === 'member' ? 'member' : 'group',
+  // 图片落盘（P0-3）：下载到本机再告诉模型路径；默认拒绝私网地址，防 SSRF。
+  downloadImages: process.env.BRIDGE_DOWNLOAD_IMAGES !== '0',
+  imageDir: process.env.BRIDGE_IMAGE_DIR ||
+    (process.env.BRIDGE_STATE_FILE ? path.join(path.dirname(process.env.BRIDGE_STATE_FILE), 'images') : ''),
+  imageMaxBytes: clampInt(process.env.BRIDGE_IMAGE_MAX_BYTES, DEFAULT_IMAGE.maxBytes, 1024, 50 * 1024 * 1024),
+  imageMaxCount: clampInt(process.env.BRIDGE_IMAGE_MAX_COUNT, DEFAULT_IMAGE.maxCount, 1, 20),
+  imageTimeoutMs: clampInt(process.env.BRIDGE_IMAGE_TIMEOUT_MS, DEFAULT_IMAGE.timeoutMs, 1000, 30000),
+  imageAllowPrivate: process.env.BRIDGE_IMAGE_ALLOW_PRIVATE_HOSTS === '1',
 };
 
 /**
@@ -162,6 +173,7 @@ const counts = { incoming: 0, ok: 0, failed: 0, skipped: 0, requeued: 0, denied:
 let lastPlan = null;   // 最近一次分条投递：{ bubbles, chars, at }
 let lastInteractions = null;   // 最近一轮动作：{ at, executed, failed, skipped, kinds }
 const interactionTotals = { turns: 0, executed: 0, failed: 0, skipped: 0 };
+const imageTotals = { turns: 0, downloaded: 0, failed: 0 };
 // 每个聊天「上一轮」发出的气泡 id；[[recall]] 删这份，不删本轮（P0-1b）。
 // 只存内存：NapCat 会话结束后旧 id 无效，重启后重来比删错安全。
 const lastBubbles = new Map();
@@ -351,6 +363,18 @@ function snapshot() {
       aiDisclosure: cfg.aiDisclosure,
       groupSessionScope: cfg.groupSessionScope,
     },
+    images: {
+      summary: cfg.downloadImages
+        ? (cfg.imageDir ? '落盘到 ' + cfg.imageDir : '未配置目录，不会下载')
+        : '关闭（只留 [图片] 占位）',
+      enabled: cfg.downloadImages,
+      dir: cfg.imageDir || '',
+      maxBytes: cfg.imageMaxBytes,
+      maxCount: cfg.imageMaxCount,
+      timeoutMs: cfg.imageTimeoutMs,
+      allowPrivateHosts: cfg.imageAllowPrivate,
+      totals: { ...imageTotals },
+    },
     humanize: {
       summary: describeHumanize({
         enabled: cfg.humanizeEnabled,
@@ -398,6 +422,12 @@ function snapshot() {
       BRIDGE_GROUP_REPLY_AT: cfg.groupReplyAt ? 1 : 0,
       BRIDGE_AI_DISCLOSURE: cfg.aiDisclosure ? 1 : 0,
       BRIDGE_GROUP_SESSION_SCOPE: cfg.groupSessionScope,
+      BRIDGE_DOWNLOAD_IMAGES: cfg.downloadImages ? 1 : 0,
+      BRIDGE_IMAGE_DIR: cfg.imageDir || '(未配置)',
+      BRIDGE_IMAGE_MAX_BYTES: cfg.imageMaxBytes,
+      BRIDGE_IMAGE_MAX_COUNT: cfg.imageMaxCount,
+      BRIDGE_IMAGE_TIMEOUT_MS: cfg.imageTimeoutMs,
+      BRIDGE_IMAGE_ALLOW_PRIVATE_HOSTS: cfg.imageAllowPrivate ? 1 : 0,
       BRIDGE_OUTPUT_DEFAULT: cfg.outputDefault,
       BRIDGE_OUTPUT_FILE: cfg.outputFile || '(不落盘)',
       BRIDGE_AUTO_COMPACT_ROUNDS: cfg.autoCompactRounds,
@@ -504,7 +534,8 @@ async function classifyEvent(ev) {
   return {
     info: {
       kind, key, text, userId: senderId, name, groupId: ev.group_id, messageId: ev.message_id,
-      mentioned, selfId, unsupported: norm.unsupported, repliedTo: norm.repliedTo, quote, images: norm.images,
+      mentioned, selfId, unsupported: norm.unsupported, repliedTo: norm.repliedTo, quote,
+      images: norm.imageSources, imageCount: norm.images,
     },
   };
 }
@@ -906,6 +937,95 @@ async function runEcho(prompt) {
 }
 
 /**
+ * 目的：把本轮图片下载到本机（当前 state 的 images 目录），供 DSH 用文件工具查看。
+ * 输入：sources（OneBot image 段的 url/file）、chatKey（只用于日志）。
+ * 输出：{ paths, errors }；paths 是绝对路径，errors 是 {reason}。
+ * 失败：单张失败只记 errors 和一条 warn，不影响整轮；目录未配置/关闭时返回空。
+ * 副作用：HTTP 下载、写文件（0600）、累计 imageTotals。
+ */
+async function collectImages(sources, chatKey) {
+  const result = { paths: [], errors: [] };
+  if (!cfg.downloadImages) return result;
+  const list = (Array.isArray(sources) ? sources : []).slice(0, cfg.imageMaxCount);
+  if (!list.length) return result;
+  imageTotals.turns++;
+  if (!cfg.imageDir) {
+    result.errors.push({ reason: '没有配置图片目录' });
+    imageTotals.failed += list.length;
+    return result;
+  }
+  for (const raw of list) {
+    const src = String(raw || '');
+    let timer = null;
+    try {
+      // 旧版踩过的坑：file:// 和绝对路径会把任意本地文件复制进 workspace，必须拒绝。
+      if (/^file:\/\//i.test(src) || src.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(src)) {
+        throw new Error('拒绝本地文件路径（安全限制）');
+      }
+      let url = await assertPublicHttpUrl(src, { allowPrivate: cfg.imageAllowPrivate });
+      const ctrl = new AbortController();
+      timer = setTimeout(() => ctrl.abort(), cfg.imageTimeoutMs);
+      let res = null;
+      // 手动跟 3xx：每一跳都重新做 SSRF 校验，防止公网 URL 302 到 127.0.0.1。
+      for (let hop = 0; hop < 4; hop++) {
+        res = await fetch(url, { signal: ctrl.signal, redirect: 'manual' });
+        if (![301, 302, 303, 307, 308].includes(res.status)) break;
+        const loc = res.headers.get('location');
+        try { if (res.body) await res.body.cancel(); } catch {}
+        if (!loc) throw new Error('重定向没有 Location');
+        url = await assertPublicHttpUrl(new URL(loc, url).toString(), { allowPrivate: cfg.imageAllowPrivate });
+        res = null;
+      }
+      if (!res) throw new Error('重定向次数过多');
+      if (!res.ok) {
+        try { if (res.body) await res.body.cancel(); } catch {}
+        throw new Error('HTTP ' + res.status);
+      }
+      const ext = imageExtension(res.headers.get('content-type'));
+      if (!ext) throw new Error('不是支持的图片类型（' + (res.headers.get('content-type') || '无 content-type') + '）');
+      const len = Number(res.headers.get('content-length'));
+      if (Number.isFinite(len) && len > cfg.imageMaxBytes) throw new Error('图片超过大小上限');
+      const chunks = [];
+      let total = 0;
+      if (res.body && typeof res.body.getReader === 'function') {
+        const reader = res.body.getReader();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          total += value.byteLength;
+          if (total > cfg.imageMaxBytes) {
+            try { ctrl.abort(); } catch {}
+            throw new Error('图片超过大小上限');
+          }
+          chunks.push(Buffer.from(value));
+        }
+      } else {
+        const buf = Buffer.from(await res.arrayBuffer());
+        total = buf.length;
+        if (total > cfg.imageMaxBytes) throw new Error('图片超过大小上限');
+        chunks.push(buf);
+      }
+      fs.mkdirSync(cfg.imageDir, { recursive: true, mode: 0o700 });
+      const name = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext;
+      const file = path.join(cfg.imageDir, name);
+      fs.writeFileSync(file, Buffer.concat(chunks), { mode: 0o600 });
+      result.paths.push(file);
+    } catch (e) {
+      const reason = e && e.name === 'AbortError'
+        ? '下载超时（' + Math.round(cfg.imageTimeoutMs / 1000) + 's）'
+        : redactText((e && e.message) || String(e)).slice(0, 160);
+      result.errors.push({ reason });
+      log('warn: 图片处理失败', chatKey, reason);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  imageTotals.downloaded += result.paths.length;
+  imageTotals.failed += result.errors.length;
+  return result;
+}
+
+/**
  * 目的：让一个聊天的一轮消息走 DSH；持久会话失效时清掉映射并重开，避免永久卡死。
  * 输入：info 为 classifyEvent 的结果；不直接信任聊天内容。
  * 输出：{ text, sessionId }，text 可能为空。
@@ -924,12 +1044,27 @@ async function askDsh(info) {
     ? interactionHint({ maxActions: cfg.interactionsMax, groupPoke: cfg.interactionsGroupPoke })
     : '';
   const needHint = !!hint && (!prev || !hintedSessions.has(prev));
+  // 图片落盘（P0-3）：先把图片下载到本机，再把路径给模型；失败只记 errors，不挡这一轮。
+  const imageResult = cfg.downloadImages && info.images && info.images.length
+    ? await collectImages(info.images, info.key)
+    : { paths: [], errors: [] };
+  info.imagePaths = imageResult.paths;
+  info.imageNotice = '';
   // 引用回复：能读到就带上原话；读不到就明确说不可读，不让模型猜。
   let task = info.text;
   if (info.repliedTo) task = formatQuoteContext(info.quote || { ok: false }) + task;
   // 文字 + 语音/文件：告诉模型“还有一部分没读到”，避免它假装看过。
   if (info.unsupported && info.unsupported.length) {
     task += (task ? '\n\n' : '') + unsupportedTaskNote(info.unsupported);
+  }
+  if (imageResult.paths.length) {
+    task += (task ? '\n\n' : '') + imageContext(imageResult.paths);
+  }
+  if (imageResult.errors.length) {
+    task += (task ? '\n\n' : '') + '（本轮有 ' + imageResult.errors.length +
+      ' 张图片没有读取成功：' + imageResult.errors.map((x) => x.reason).join('；').slice(0, 300) + '）';
+    // 全部失败时，除了告诉模型，也要在正文前告诉用户“图片没读到”。
+    if (!imageResult.paths.length) info.imageNotice = imageErrorNote(imageResult.errors);
   }
   const prompt = summary + ctxBlock + task + (needHint ? '\n\n' + hint : '');
   /** 目的：标记某个会话已拼过提示；新区块要等 DSH 返回 sessionId 才知道。副作用：改内存 Set、写日志。 */
@@ -1332,6 +1467,8 @@ const server = http.createServer(async (req, res) => {
       const actionOnly = !reply && parsed.actions.length > 0;
       // 纯动作回复不发空消息；只有「模型真没内容且没有动作」时才保留旧的兜底文案。
       if (!reply && !actionOnly) reply = '（DSH 没有返回内容）';
+      // 图片全部没读成：在正文前明确告诉用户，别让回答假装看过图。
+      if (info.imageNotice && reply) reply = info.imageNotice + '\n\n' + reply;
       // 群首次触发：披露 AI 身份与本群会话隔离；只发一次，纯动作轮不发。
       if (reply && info.kind === 'group' && cfg.aiDisclosure && !disclosedChats.has(info.key)) {
         disclosedChats.add(info.key);

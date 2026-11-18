@@ -35,6 +35,8 @@ eq('poke → [戳一戳]', normalizeMessage([{ type: 'poke', data: {} }]).text, 
 
 const withImage = normalizeMessage([{ type: 'image', data: { file: 'a.jpg' } }]);
 eq('图片占位与计数', [withImage.text, withImage.images], ['[图片]', 1]);
+eq('图片源 URL 保留', withImage.imageSources, ['a.jpg']);
+eq('图片源优先取 url', normalizeMessage([{ type: 'image', data: { url: 'https://x/a.png', file: 'b.jpg' } }]).imageSources, ['https://x/a.png']);
 
 const reply = normalizeMessage([
   { type: 'reply', data: { id: 777 } },
@@ -58,7 +60,7 @@ eq('重复类型去重', normalizeMessage([
 
 eq('纯字符串消息', normalizeMessage('  你好  ').text, '你好');
 eq('非数组非字符串返回空结构', normalizeMessage(null), {
-  text: '', mentioned: false, repliedTo: null, unsupported: [], images: 0,
+  text: '', mentioned: false, repliedTo: null, unsupported: [], images: 0, imageSources: [],
 });
 
 // --- 会话 key ---

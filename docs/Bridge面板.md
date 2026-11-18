@@ -142,6 +142,12 @@
 | `messageLayer.groupReplyAt` | boolean | 群回复是否 @ 提问者 |
 | `messageLayer.aiDisclosure` | boolean | 群首次是否披露 AI 身份 |
 | `messageLayer.groupSessionScope` | string | `group` 或 `member` |
+| `images.summary` | string | 图片落盘目录/开关；未配置时明确说不会下载 |
+| `images.enabled` | boolean | 图片落盘总开关 |
+| `images.dir` | string | 落盘目录；空 = 未配置 |
+| `images.maxBytes` / `maxCount` / `timeoutMs` | number | 单张上限、每轮张数、超时 |
+| `images.allowPrivateHosts` | boolean | 是否允许私网图片地址（默认 false） |
+| `images.totals` | object | 累计轮数、成功张数、失败张数 |
 | `alerts.qq` | string | 告警接收人（打码）；未设置时为 `(未设置)` |
 | `alerts.sent` / `suppressed` | number | 已发告警条数 / 被冷却压掉的次数 |
 | `alerts.streak` | number | 当前连续失败次数（成功一次清零） |
@@ -169,7 +175,7 @@
 ### 4.1 概览
 
 - 指标卡：收到消息、成功回复、失败、跳过、排队中、待补发、运行时长。
-- 信息行：后端、监听、NapCat API、状态文件、补发队列、告警接收、磁盘占用、交互动作、消息层。
+- 信息行：后端、监听、NapCat API、状态文件、补发队列、告警接收、磁盘占用、交互动作、消息层、图片落盘。
 - 失败/排队/待补发 > 0 时数字用警示色。
 
 ### 4.2 会话
@@ -186,7 +192,7 @@
 
 ### 4.4 配置
 
-- 按组展示：连接、行为、交互动作、消息层、DSH、回发与告警、其它。
+- 按组展示：连接、行为、交互动作、消息层、图片落盘、DSH、回发与告警、其它。
 - 值只读；空值显示 `(空)`；布尔显示 `开/关`。
 - 底部提示：改 `$DATA/etc/tinda.conf` 后 `bin/unit.sh restart bridge`。
 - **没有保存按钮**，这是安全边界，不是漏做。

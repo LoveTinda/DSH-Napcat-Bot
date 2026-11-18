@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## v0.2.35
+- **P0-3 图片落盘**：新增 `units/bridge/image.mjs`——收到 `image` 段先下载到
+  `$DATA/state/bridge/images`，再把本机路径交给模型用文件工具查看，不再只有
+  `[图片]` 占位
+- 安全边界：只允许 http/https；拒绝 `file://`/绝对路径；默认拒绝 localhost、
+  私网、链路本地、多播（含 IPv4-mapped IPv6）；域名先 DNS 解析再逐个地址检查；手动跟 3xx，每一跳重新校验
+  （防公网 URL 302 到 127.0.0.1）；content-type 白名单 png/jpeg/gif/webp；
+  Content-Length 与流式读取双重大小上限；AbortController 超时
+- 默认 10MB / 8 张 / 8 秒；目录 0700、文件 0600；文件名时间戳+随机，扩展名只由
+  content-type 决定
+- 成功时任务末尾加「本轮附带 N 张图片，已保存到：…」；全部失败时正文前加
+  「有 N 张图片没能读取…」，不让模型假装看过；部分失败在任务里注明
+- 配置：`BRIDGE_DOWNLOAD_IMAGES`、`BRIDGE_IMAGE_DIR`、`BRIDGE_IMAGE_MAX_BYTES`、
+  `BRIDGE_IMAGE_MAX_COUNT`、`BRIDGE_IMAGE_TIMEOUT_MS`、
+  `BRIDGE_IMAGE_ALLOW_PRIVATE_HOSTS`；启动脚本、模板、面板「图片落盘」一行、文档已同步
+- 测试：`test-image.mjs` 38 项（私网/映射 IPv6/尾点/协议/DNS/content-type/文案）+
+  `test-roundtrip.mjs` 43 项（假图片服务器：成功落盘并给路径、404、错误 content-type、0600/0700 权限）；
+  全套 22 个测试文件通过
+- 边界：图片上传/导出未做；引用消息里的图片不下载；落盘目录不自动清理；
+  没有真 QQ，图片 URL/CDN 行为以假服务器为准
+
 ## v0.2.34
 - **P0-2 消息层**：新增 `units/bridge/message.mjs`，补齐旧版消息层的七项行为：
   引用回复、`[表情]`、`[戳一戳]`、不支持类型提示、群回复 @、群首次 AI 身份披露、
