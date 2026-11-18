@@ -75,13 +75,12 @@ now=$(readlink /proc/self/ns/mnt 2>/dev/null || true)
 [ -n "$now" ] || { say "FAIL  读不到子进程 namespace id，拒绝 mount"; exit 19; }
 [ "$now" != "${PROBE_NS:-}" ] || { say "FAIL  仍在宿主 mount namespace，拒绝 mount"; exit 11; }
 say "ok    已进入新 mount namespace"
+# 必须是递归私有：只把 / 设为 private，已有 shared 子挂载仍可能把新挂载传回宿主。
 if ! mount --make-rprivate / 2>/dev/null; then
-  if ! mount --make-private / 2>/dev/null; then
-    say "FAIL  无法建立私有挂载传播"
-    exit 12
-  fi
+  say "FAIL  不支持 make-rprivate（只 make-private 不足以保证递归私有）"
+  exit 12
 fi
-say "ok    私有挂载传播已建立"
+say "ok    递归私有挂载传播已建立"
 
 [ "${MOUNT_TEST:-0}" = 1 ] || { say "ok    只读探测结束，未创建挂载"; exit 0; }
 
