@@ -28,6 +28,33 @@ const mock = http.createServer((req, res) => {
   req.on('end', () => {
     let body = {};
     try { body = JSON.parse(raw || '{}'); } catch {}
+    // 引用回复会先调 get_msg；这里按 id 返回固定消息，且不计入 sent（它不是回发）。
+    if (req.url === '/get_msg') {
+      const qid = String(body.message_id ?? '');
+      if (qid === '777') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          status: 'ok', retcode: 0,
+          data: {
+            message: [{ type: 'text', data: { text: '被引用的原话' } }],
+            sender: { user_id: 10000, nickname: '机器人' },
+          },
+        }));
+      } else if (qid === '888') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({
+          status: 'ok', retcode: 0,
+          data: {
+            message: [{ type: 'text', data: { text: '别人的话' } }],
+            sender: { user_id: 20002, nickname: '群友' },
+          },
+        }));
+      } else {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ status: 'failed', retcode: 1, message: 'not found' }));
+      }
+      return;
+    }
     const id = String(body.user_id ?? body.group_id ?? '');
     sent.push({ path: req.url, body });
     let fail = blocked.has(id);
@@ -95,6 +122,8 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     BRIDGE_TYPING: '0',
     BRIDGE_SEEN_FILE: '',
     BRIDGE_POLICY_FILE: policyFile,
+    // 非法值必须回退到 group，而不是把 key 拼坏。
+    BRIDGE_GROUP_SESSION_SCOPE: 'bogus',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -106,6 +135,9 @@ const up = await waitFor(async () => {
   try { const r = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/healthz`); return r.ok; } catch { return false; }
 }, 8000);
 check('桥接器启动 /healthz 可用', Boolean(up), blog.slice(-300));
+const st0 = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/state.json`).then((r) => r.json()).catch(() => ({}));
+check('非法群会话范围回退 group', Boolean(st0.messageLayer && st0.messageLayer.groupSessionScope === 'group'),
+  JSON.stringify(st0.messageLayer));
 
 // 1) 私聊消息 → send_private_msg 且带上 echo 结果
 await post({
@@ -127,6 +159,23 @@ await post({
 const grp = await waitFor(() => sent.slice(before).find((s) => s.path === '/send_group_msg'));
 check('群聊事件触发 send_group_msg', Boolean(grp), JSON.stringify(sent.slice(before)));
 check('群号正确', Boolean(grp && String(grp.body.group_id) === '30001'), JSON.stringify(grp && grp.body));
+check('群回复 @ 提问者', Boolean(grp && String(grp.body.message).startsWith('[CQ:at,qq=20002] ')),
+  JSON.stringify(grp && grp.body));
+check('群首次回复披露 AI 身份', Boolean(grp && String(grp.body.message).includes('我是接入 DSH 的机器人')),
+  JSON.stringify(grp && grp.body));
+
+// 2.1) 同一群第二条：不再披露，但仍 @ 新的提问者
+const g2Mark = sent.length;
+await post({
+  post_type: 'message', message_type: 'group', self_id: 10000, user_id: 20003, group_id: 30001,
+  message_id: 14,
+  message: [{ type: 'at', data: { qq: '10000' } }, { type: 'text', data: { text: '第二句' } }],
+});
+const grp2 = await waitFor(() => sent.slice(g2Mark).find((s) => s.path === '/send_group_msg'));
+check('同群第二次不再披露', Boolean(grp2) && !String(grp2.body.message).includes('我是接入 DSH 的机器人'),
+  JSON.stringify(grp2 && grp2.body));
+check('同群第二次 @ 新提问者', Boolean(grp2) && String(grp2.body.message).startsWith('[CQ:at,qq=20003] '),
+  JSON.stringify(grp2 && grp2.body));
 
 // 3) 自己发的消息不回环
 const before2 = sent.length;
@@ -148,6 +197,73 @@ const before4 = sent.length;
 await post({ post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20004, message: [] });
 await wait(400);
 check('空消息被忽略', sent.length === before4, JSON.stringify(sent.slice(before4)));
+
+// 5.1) 表情 / 戳一戳：占位符要进提示词，不能静默
+const faceMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20020,
+  message_id: 71, message: [{ type: 'text', data: { text: '前面' } }, { type: 'face', data: { id: '1' } }],
+});
+const faceReply = await waitFor(() => sent.slice(faceMark).find((s) => s.path === '/send_private_msg'));
+check('表情进入提示词', Boolean(faceReply) && String(faceReply.body.message).includes('[表情]'),
+  JSON.stringify(faceReply && faceReply.body));
+
+const pokeMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20021,
+  message_id: 72, message: [{ type: 'poke', data: {} }],
+});
+const pokeReply = await waitFor(() => sent.slice(pokeMark).find((s) => s.path === '/send_private_msg'));
+check('戳一戳进入提示词', Boolean(pokeReply) && String(pokeReply.body.message).includes('[戳一戳]'),
+  JSON.stringify(pokeReply && pokeReply.body));
+
+// 5.2) 只发语音：明确回“暂不支持”，不烧 DSH 回合
+const unsupMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20022,
+  message_id: 73, message: [{ type: 'record', data: { file: 'a.amr' } }],
+});
+const unsupReply = await waitFor(() => sent.slice(unsupMark).find((s) => s.path === '/send_private_msg'));
+check('语音-only 明确提示暂不支持', Boolean(unsupReply) && String(unsupReply.body.message).includes('暂不支持语音'),
+  JSON.stringify(unsupReply && unsupReply.body));
+check('语音-only 不触发 DSH 回显', Boolean(unsupReply) && !String(unsupReply.body.message).includes('[echo]'),
+  JSON.stringify(unsupReply && unsupReply.body));
+
+// 5.3) 引用回复：get_msg 可读时把原话拼进提示词
+const quoteMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20023,
+  message_id: 74,
+  message: [{ type: 'reply', data: { id: 777 } }, { type: 'text', data: { text: '你看这个' } }],
+});
+const quoteReply = await waitFor(() => sent.slice(quoteMark).find((s) => s.path === '/send_private_msg'));
+check('引用内容进入提示词', Boolean(quoteReply) && String(quoteReply.body.message).includes('被引用的原话'),
+  JSON.stringify(quoteReply && quoteReply.body));
+check('引用内容标明发送者', Boolean(quoteReply) && String(quoteReply.body.message).includes('引用回复 机器人'),
+  JSON.stringify(quoteReply && quoteReply.body));
+
+// 5.3b) 引用取不到：明确说不可读，不让模型猜
+const quoteBadMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20025,
+  message_id: 76,
+  message: [{ type: 'reply', data: { id: 999 } }, { type: 'text', data: { text: '这啥' } }],
+});
+const quoteBadReply = await waitFor(() => sent.slice(quoteBadMark).find((s) => s.path === '/send_private_msg'));
+check('引用不可读时明确提示', Boolean(quoteBadReply) && String(quoteBadReply.body.message).includes('引用消息不可读'),
+  JSON.stringify(quoteBadReply && quoteBadReply.body));
+
+// 5.4) 群里“回复机器人那条”没有 @ 也算 mention
+const quoteGroupMark = sent.length;
+await post({
+  post_type: 'message', message_type: 'group', self_id: 10000, user_id: 20024, group_id: 30003,
+  message_id: 75,
+  message: [{ type: 'reply', data: { id: 777 } }, { type: 'text', data: { text: '这是什么' } }],
+});
+const quoteGroupReply = await waitFor(() => sent.slice(quoteGroupMark).find((s) => s.path === '/send_group_msg'));
+check('回复机器人算 @：群里不 @ 也回', Boolean(quoteGroupReply), JSON.stringify(sent.slice(quoteGroupMark)));
+check('回复机器人：引用原话进提示词', Boolean(quoteGroupReply) && String(quoteGroupReply.body.message).includes('被引用的原话'),
+  JSON.stringify(quoteGroupReply && quoteGroupReply.body));
 
 // 6) 坏 JSON 返回 400 且不崩
 const bad = await fetch(`http://127.0.0.1:${BRIDGE_PORT}/`, {

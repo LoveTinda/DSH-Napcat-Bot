@@ -294,6 +294,10 @@ function renderOverview(s) {
   const it = s.interactions || {};
   const lastIt = it.last ? ' · 本轮 ' + it.last.executed + ' 个 / 失败 ' + it.last.failed : ' · 还没执行过';
   row('交互动作', (it.summary || '未知') + lastIt, it.last && it.last.failed ? 'warn' : '');
+
+  // 消息层（P0-2）：群回复 @、首次披露、群会话隔离；只显示策略，不含聊天内容。
+  const ml = s.messageLayer || {};
+  row('消息层', ml.summary || '未知');
 }
 
 function renderSessions(s) {
@@ -360,6 +364,7 @@ function renderConfig(s) {
     ['连接', ['BRIDGE_LISTEN', 'NAPCAT_API', 'NAPCAT_TOKEN', 'BRIDGE_STATE_FILE']],
     ['行为', ['BRIDGE_BACKEND', 'BRIDGE_ALLOW_GROUP', 'BRIDGE_TIMEOUT_MS', 'BRIDGE_PERMISSION_MODE']],
     ['交互动作', ['BRIDGE_INTERACTIONS', 'BRIDGE_INTERACTIONS_GROUP_POKE', 'BRIDGE_INTERACTIONS_MAX', 'BRIDGE_INTERACTIONS_TIMEOUT_MS']],
+    ['消息层', ['BRIDGE_GROUP_REPLY_AT', 'BRIDGE_AI_DISCLOSURE', 'BRIDGE_GROUP_SESSION_SCOPE']],
     ['DSH', ['DSH_BIN', 'DSH_HOME']],
     ['回发与告警', ['BRIDGE_MAX_EVENT_AGE_SEC', 'BRIDGE_SEEN_FILE', 'BRIDGE_SEND_RETRY', 'BRIDGE_SEND_DRAIN_MS', 'BRIDGE_OUTBOX_TTL_MS', 'BRIDGE_OUTBOX_FILE', 'ALERT_QQ', 'ALERT_FAIL_STREAK', 'ALERT_COOLDOWN_SEC', 'DISK_ALERT_PERCENT']],
   ];

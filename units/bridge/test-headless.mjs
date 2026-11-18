@@ -75,6 +75,8 @@ const bridge = spawn(process.execPath, [BRIDGE], {
     DSH_HOME: tmp,
     BRIDGE_STATE_FILE: stateFile,
     BRIDGE_TIMEOUT_MS: '20000',
+    // 本测试顺带验证群成员级会话：同群两个人应落成两个 key，而不是共用一条。
+    BRIDGE_GROUP_SESSION_SCOPE: 'member',
     NODE_OPTIONS: '',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -128,6 +130,29 @@ const argv3 = fs.readFileSync(argvLog, 'utf8').trim().split('\n').pop();
 check('重开时不再带旧 session id', !argv3.includes('--session-id'), argv3);
 const saved2 = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
 check('新的会话 id 已落盘', saved2['private:90001'] === 'sess-2', JSON.stringify(saved2));
+
+// 成员级会话：同一群、两个不同的人，各自一个 key（上下文不串）。
+const mg1 = sent.length;
+await post({
+  post_type: 'message', message_type: 'group', self_id: 1, user_id: 91001, group_id: 31001,
+  message_id: 91,
+  message: [{ type: 'at', data: { qq: '1' } }, { type: 'text', data: { text: '甲' } }],
+});
+check('成员级会话：第一个人有回复', Boolean(await waitFor(() => sent.slice(mg1).find((s) => s.path === '/send_group_msg'))),
+  JSON.stringify(sent.slice(mg1)));
+const mg2 = sent.length;
+await post({
+  post_type: 'message', message_type: 'group', self_id: 1, user_id: 91002, group_id: 31001,
+  message_id: 92,
+  message: [{ type: 'at', data: { qq: '1' } }, { type: 'text', data: { text: '乙' } }],
+});
+check('成员级会话：第二个人有回复', Boolean(await waitFor(() => sent.slice(mg2).find((s) => s.path === '/send_group_msg'))),
+  JSON.stringify(sent.slice(mg2)));
+await wait(500);
+const saved3 = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+check('成员级会话：同群两个人拆成两个 key',
+  Boolean(saved3['group:31001:91001'] && saved3['group:31001:91002']),
+  JSON.stringify(saved3));
 
 bridge.kill('SIGTERM');
 mock.close();

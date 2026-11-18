@@ -138,12 +138,16 @@
 | `interactions.enabled` | boolean | 总开关；false 时正文标记原样保留 |
 | `interactions.last` | object \| null | 最近一轮动作：执行/失败/跳过数、动作种类；没有执行过为 null |
 | `interactions.totals` | object | 累计轮数、执行数、失败数、跳过数 |
+| `messageLayer.summary` | string | 群回复 @、首次披露、群会话范围的当前策略 |
+| `messageLayer.groupReplyAt` | boolean | 群回复是否 @ 提问者 |
+| `messageLayer.aiDisclosure` | boolean | 群首次是否披露 AI 身份 |
+| `messageLayer.groupSessionScope` | string | `group` 或 `member` |
 | `alerts.qq` | string | 告警接收人（打码）；未设置时为 `(未设置)` |
 | `alerts.sent` / `suppressed` | number | 已发告警条数 / 被冷却压掉的次数 |
 | `alerts.streak` | number | 当前连续失败次数（成功一次清零） |
 | `alerts.lastKind` / `lastAt` | string / number | 最近一次告警的类型与时间 |
 | `alerts.diskPercent` | number \| null | 数据分区已用百分比；拿不到为 null |
-| `sessions[].key` | string | `private:<qq>` 或 `group:<group_id>` |
+| `sessions[].key` | string | `private:<qq>`、`group:<group_id>`，或成员级会话的 `group:<group_id>:<qq>` |
 | `sessions[].sessionId` | string | DSH 会话 id；空 = 尚未建立 |
 | `sessions[].messages` | number | 成功轮数 |
 | `sessions[].lastAt` | number | 最近活动毫秒时间戳；0 = 无 |
@@ -165,7 +169,7 @@
 ### 4.1 概览
 
 - 指标卡：收到消息、成功回复、失败、跳过、排队中、待补发、运行时长。
-- 信息行：后端、监听、NapCat API、状态文件、补发队列、告警接收、磁盘占用、交互动作。
+- 信息行：后端、监听、NapCat API、状态文件、补发队列、告警接收、磁盘占用、交互动作、消息层。
 - 失败/排队/待补发 > 0 时数字用警示色。
 
 ### 4.2 会话
@@ -182,7 +186,7 @@
 
 ### 4.4 配置
 
-- 按组展示：连接、行为、交互动作、DSH、回发与告警、其它。
+- 按组展示：连接、行为、交互动作、消息层、DSH、回发与告警、其它。
 - 值只读；空值显示 `(空)`；布尔显示 `开/关`。
 - 底部提示：改 `$DATA/etc/tinda.conf` 后 `bin/unit.sh restart bridge`。
 - **没有保存按钮**，这是安全边界，不是漏做。

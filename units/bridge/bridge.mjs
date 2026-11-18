@@ -2,8 +2,9 @@
 /**
  * 目的：OneBot 11 桥接最小实现——接收 NapCat 的事件推送，交给 DSH 处理，把结果回发到聊天；
  *       同时提供只读面板与状态接口，供网关 /bridge/ 反代。
- * 边界：不做权限、人设、/output 分档、群上下文（后续单元再加）；不解析富文本，只取纯文本；
- *       不保存聊天记录；面板不接受写操作；补发队列只存「待发出的回复」和最短路由信息，过期即删。
+ * 边界：不做图片下载/上传、流式分段、插话打断、会话工作区（后续任务再做）；不解析富文本，
+ *       只取文本/表情/戳一戳/引用摘要；不保存聊天记录；面板不接受写操作；
+ *       补发队列只存「待发出的回复」和最短路由信息，过期即删。
  *       lastBubbles（chatKey → 上一轮气泡 id）只存内存、不落盘：气泡 id 只在 NapCat 会话有效期内
  *       可删，重启后陈旧 id 反而会报错；重启后第一次 recall 按「没有上一轮」跳过即可。
  * 依赖：NapCat 的 OneBot HTTP API（默认 127.0.0.1:3001）、DSH 的 `headless` 子命令、本机 node、
@@ -35,6 +36,10 @@ import { createRelay, DEFAULT_RELAY } from './relay.mjs';
 import {
   parseActions, runActions, interactionHint, describeInteractions, DEFAULT_INTERACTIONS,
 } from './interactions.mjs';
+import {
+  normalizeMessage, chatKeyFor, formatQuoteContext, unsupportedReply, unsupportedTaskNote,
+  disclosureText, atPrefix,
+} from './message.mjs';
 
 const cfg = {
   listen: process.env.BRIDGE_LISTEN || '127.0.0.1:6700',
@@ -93,6 +98,10 @@ const cfg = {
   relayAfter: clampInt(process.env.BRIDGE_RELAY_AFTER, DEFAULT_RELAY.afterFailures, 1, 50),
   relayCooldownMs: clampInt(process.env.BRIDGE_RELAY_COOLDOWN_SEC, Math.round(DEFAULT_RELAY.cooldownMs / 1000), 10, 86400) * 1000,
   relayMessage: process.env.BRIDGE_RELAY_MESSAGE || DEFAULT_RELAY.message,
+  // 消息层（P0-2）：群回复是否 @ 提问者、群首次是否披露 AI 身份、群会话按群还是按成员。
+  groupReplyAt: process.env.BRIDGE_GROUP_REPLY_AT !== '0',
+  aiDisclosure: process.env.BRIDGE_AI_DISCLOSURE !== '0',
+  groupSessionScope: process.env.BRIDGE_GROUP_SESSION_SCOPE === 'member' ? 'member' : 'group',
 };
 
 /**
@@ -198,6 +207,7 @@ const policy = policyState.policy;
 const policyDenied = Object.create(null);   // why → 次数，面板用
 const runningChild = new Map();  // chatKey → 正在跑的 DSH 子进程（/stop 用）
 const notices = new Map();       // chatKey → false 表示关掉「使用提示」（内存态，重启复位）
+const disclosedChats = new Set();     // chatKey → 已经披露过 AI 身份（内存态，重启后重披露一次）
 const cmdHits = Object.create(null);  // 命令名 → 次数，面板用
 // 输出档位（⑤）：chatKey → tier；落盘，重启后用户的选择还在。
 let tiers = {};
@@ -333,6 +343,14 @@ function snapshot() {
       last: lastInteractions,
       totals: { ...interactionTotals },
     },
+    messageLayer: {
+      summary: (cfg.groupReplyAt ? '群回复 @ 提问者' : '群回复不带 @') +
+        (cfg.aiDisclosure ? ' · 首次披露' : ' · 不披露') +
+        (cfg.groupSessionScope === 'member' ? ' · 成员级会话' : ' · 每群一条会话'),
+      groupReplyAt: cfg.groupReplyAt,
+      aiDisclosure: cfg.aiDisclosure,
+      groupSessionScope: cfg.groupSessionScope,
+    },
     humanize: {
       summary: describeHumanize({
         enabled: cfg.humanizeEnabled,
@@ -377,6 +395,9 @@ function snapshot() {
       BRIDGE_INTERACTIONS_GROUP_POKE: cfg.interactionsGroupPoke ? 1 : 0,
       BRIDGE_INTERACTIONS_MAX: cfg.interactionsMax,
       BRIDGE_INTERACTIONS_TIMEOUT_MS: cfg.interactionsTimeoutMs,
+      BRIDGE_GROUP_REPLY_AT: cfg.groupReplyAt ? 1 : 0,
+      BRIDGE_AI_DISCLOSURE: cfg.aiDisclosure ? 1 : 0,
+      BRIDGE_GROUP_SESSION_SCOPE: cfg.groupSessionScope,
       BRIDGE_OUTPUT_DEFAULT: cfg.outputDefault,
       BRIDGE_OUTPUT_FILE: cfg.outputFile || '(不落盘)',
       BRIDGE_AUTO_COMPACT_ROUNDS: cfg.autoCompactRounds,
@@ -411,39 +432,50 @@ function saveSessions() {
 
 // ---------- OneBot 消息解析 ----------
 /**
- * 目的：把 OneBot 消息段拼成纯文本，并识别「有没有 @ 我」。
- * 输入：message（字符串或段数组）、selfId（机器人自己的 QQ 号）。
- * 输出：{ text, mentioned }；@ 自己的段从正文里去掉（否则会变成「@12345 你好」这种噪声）。
- * 失败：不抛错；结构不认识就当空消息。副作用：无。
+ * 目的：取被引用消息的文本/图片数与发送者，用来判断“回复机器人”算不算 @，并给模型一点上下文。
+ * 输入：message_id（引用段里的 id）；timeoutMs 默认 4s。
+ * 输出：{ ok, text, images, senderId, senderName } 或 { ok:false, error }。
+ * 失败：网络/接口失败只返回 ok:false，由调用方在提示里明确“引用不可读”，不抛错。
+ * 副作用：一次本机 OneBot HTTP 请求，不发消息。
  */
-function textOf(message, selfId = '') {
-  if (typeof message === 'string') return { text: message.trim(), mentioned: false };
-  if (!Array.isArray(message)) return { text: '', mentioned: false };
-  const out = [];
-  let mentioned = false;
-  for (const seg of message) {
-    if (!seg || typeof seg !== 'object') continue;
-    if (seg.type === 'text' && seg.data && typeof seg.data.text === 'string') out.push(seg.data.text);
-    else if (seg.type === 'image') out.push('[图片]');
-    else if (seg.type === 'record') out.push('[语音]');
-    else if (seg.type === 'file') out.push('[文件]');
-    else if (seg.type === 'at' && seg.data && seg.data.qq) {
-      const qq = String(seg.data.qq);
-      if (selfId && qq === String(selfId)) mentioned = true;      // @ 我：只记标志，不进正文
-      else out.push('@' + qq);
+async function fetchReplyContext(messageId, timeoutMs = 4000) {
+  const headers = { 'content-type': 'application/json' };
+  if (cfg.napcatToken) headers.authorization = `Bearer ${cfg.napcatToken}`;
+  try {
+    const res = await fetch(`${cfg.napcatApi}/get_msg`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ message_id: messageId }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || (data && data.status && data.status !== 'ok')) {
+      return { ok: false, error: `get_msg 失败 HTTP ${res.status}` };
     }
+    const d = data && data.data && typeof data.data === 'object' ? data.data : null;
+    if (!d || (!d.message && !d.raw_message)) return { ok: false, error: 'get_msg 没有返回消息正文' };
+    const n = normalizeMessage(d.message ?? d.raw_message, '');
+    const sender = d.sender && typeof d.sender === 'object' ? d.sender : {};
+    return {
+      ok: true,
+      text: n.text,
+      images: n.images,
+      senderId: sender.user_id == null ? null : String(sender.user_id),
+      senderName: String(sender.card || sender.nickname || sender.user_id || '').slice(0, 32),
+    };
+  } catch (e) {
+    return { ok: false, error: redactText((e && e.message) || String(e)).slice(0, 120) };
   }
-  return { text: out.join('').trim(), mentioned };
 }
 
 /**
- * 目的：把一条 OneBot 事件分类成「要处理」或「跳过 + 原因」，跳过原因只记元信息。
+ * 目的：把一条 OneBot 事件分类成「要处理」或「跳过 + 原因」，并取好引用上下文。
  * 输入：原始 OneBot 事件对象，来源不可信。
- * 输出：{ info } 或 { skip }；info 含 kind/key/text/userId/groupId/messageId。
- * 失败：不抛错；缺字段按空值处理。
- * 副作用：无。
+ * 输出：{ info } 或 { skip }；info 含 kind/key/text/userId/groupId/messageId/unsupported/quote。
+ * 失败：不抛错；缺字段按空值处理。取引用失败只让 quote.ok=false，不丢消息。
+ * 副作用：可能发一次 get_msg 请求。
  */
-function classifyEvent(ev) {
+async function classifyEvent(ev) {
   if (!ev || typeof ev !== 'object') return { skip: '不是对象' };
   if (ev.post_type !== 'message') return { skip: '非消息事件' };
   const kind = ev.message_type; // private | group
@@ -452,14 +484,29 @@ function classifyEvent(ev) {
   const selfId = String(ev.self_id ?? '');
   const senderId = String(ev.user_id ?? '');
   if (selfId && senderId === selfId) return { skip: '自己发的消息' };
-  const { text, mentioned } = textOf(ev.message, selfId);
+
+  const norm = normalizeMessage(ev.message, selfId);
+  let quote = null;
+  if (norm.repliedTo) quote = await fetchReplyContext(norm.repliedTo);
+  let mentioned = norm.mentioned;
+  // 群里“回复机器人那条”要算 @：必须确认被引用消息的 sender 是 selfId，不能靠猜。
+  if (kind === 'group' && quote && quote.ok && quote.senderId != null && String(quote.senderId) === selfId) {
+    mentioned = true;
+  }
   // 群里只 @ 一下、不带正文时，@ 段被剔除后正文是空的；这种消息要留着，
   // 交给策略判定（mention 模式本来就要求 @），否则用户 @ 了却没反应。
-  if (!text && !mentioned) return { skip: '空消息或不支持的消息类型' };
-  const key = kind === 'group' ? `group:${ev.group_id}` : `private:${senderId}`;
+  // 只发不支持类型（语音/文件）时也留着，由入站层回一句“暂不支持”，而不是静默吞掉。
+  if (!norm.text && !norm.unsupported.length && !mentioned) return { skip: '空消息或不支持的消息类型' };
+  const key = chatKeyFor({ kind, groupId: ev.group_id, userId: senderId, groupSessionScope: cfg.groupSessionScope });
   const sender = ev.sender && typeof ev.sender === 'object' ? ev.sender : {};
   const name = String(sender.card || sender.nickname || '').slice(0, 32);
-  return { info: { kind, key, text: text || '(只是 @ 了我，没有正文)', userId: senderId, name, groupId: ev.group_id, messageId: ev.message_id, mentioned, selfId } };
+  const text = norm.text || (mentioned && !norm.unsupported.length && !norm.repliedTo ? '(只是 @ 了我，没有正文)' : '');
+  return {
+    info: {
+      kind, key, text, userId: senderId, name, groupId: ev.group_id, messageId: ev.message_id,
+      mentioned, selfId, unsupported: norm.unsupported, repliedTo: norm.repliedTo, quote, images: norm.images,
+    },
+  };
 }
 
 /**
@@ -513,9 +560,11 @@ function isDuplicateEvent(ev) {
 }
 
 // ---------- 回发 ----------
-async function sendReply(info, text) {
+async function sendReply(info, text, opts = {}) {
   const action = info.kind === 'group' ? 'send_group_msg' : 'send_private_msg';
-  const body = { message: text };
+  // 群回复 @ 提问者：用 CQ 字符串而不是消息段数组，补发队列/旧测试都按字符串走。
+  const prefix = info.kind === 'group' && opts.atUserId ? atPrefix(opts.atUserId) : '';
+  const body = { message: prefix ? prefix + text : text };
   if (info.kind === 'group') body.group_id = info.groupId; else body.user_id = info.userId;
   const headers = { 'content-type': 'application/json' };
   if (cfg.napcatToken) headers.authorization = `Bearer ${cfg.napcatToken}`;
@@ -644,11 +693,11 @@ function enqueueOutbox(info, text, err) {
  * 失败：抛错（调用方处理），单次等待 0.8s/1.6s/3.2s…
  * 副作用：发网络请求。
  */
-async function deliver(info, text) {
+async function deliver(info, text, opts = {}) {
   let last = null;
   for (let i = 0; i < cfg.sendRetry; i++) {
     try {
-      return await sendReply(info, text);
+      return await sendReply(info, text, opts);
     } catch (e) {
       last = e;
       if (i + 1 < cfg.sendRetry) {
@@ -668,7 +717,7 @@ async function deliver(info, text) {
  *       由调用方把剩下的进补发队列。
  * 副作用：发网络请求、sleep。
  */
-async function deliverHuman(info, text) {
+async function deliverHuman(info, text, sendOpts = {}) {
   const opts = {
     enabled: cfg.humanizeEnabled,
     maxBubbles: cfg.humanizeMaxBubbles,
@@ -681,7 +730,8 @@ async function deliverHuman(info, text) {
     const item = plan[i];
     if (item.delayMs > 0) await sleep(item.delayMs);
     try {
-      const id = await deliver(info, item.text);
+      // 只有第一条带 @；后续气泡再 @ 一次会变成骚扰。
+      const id = await deliver(info, item.text, i === 0 ? sendOpts : undefined);
       if (id != null && id !== '') messageIds.push(id);
     } catch (e) {
       const err = new Error(e.message);
@@ -874,7 +924,14 @@ async function askDsh(info) {
     ? interactionHint({ maxActions: cfg.interactionsMax, groupPoke: cfg.interactionsGroupPoke })
     : '';
   const needHint = !!hint && (!prev || !hintedSessions.has(prev));
-  const prompt = summary + ctxBlock + info.text + (needHint ? '\n\n' + hint : '');
+  // 引用回复：能读到就带上原话；读不到就明确说不可读，不让模型猜。
+  let task = info.text;
+  if (info.repliedTo) task = formatQuoteContext(info.quote || { ok: false }) + task;
+  // 文字 + 语音/文件：告诉模型“还有一部分没读到”，避免它假装看过。
+  if (info.unsupported && info.unsupported.length) {
+    task += (task ? '\n\n' : '') + unsupportedTaskNote(info.unsupported);
+  }
+  const prompt = summary + ctxBlock + task + (needHint ? '\n\n' + hint : '');
   /** 目的：标记某个会话已拼过提示；新区块要等 DSH 返回 sessionId 才知道。副作用：改内存 Set、写日志。 */
   const markHint = (sessionId) => {
     const id = sessionId || prev;
@@ -1163,7 +1220,7 @@ const server = http.createServer(async (req, res) => {
   // OneBot 11 秒回 204，业务异步做，避免上游超时重推
   res.writeHead(204).end();
 
-  const classified = classifyEvent(ev);
+  const classified = await classifyEvent(ev);
   if (!classified.info) {
     counts.skipped++;
     // meta_event/heartbeat 很频繁，只计数不写事件流；消息类被跳过才值得露出来。
@@ -1210,6 +1267,28 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // 空正文：只发了语音/文件，或只“回复机器人”没写字。直接回一句说明，不进模型、不烧回合。
+  // 旧版 default 分支会把这类消息静默吞掉，用户发了语音机器人什么都不回；这里明确回。
+  if (!info.text) {
+    const note = info.unsupported && info.unsupported.length
+      ? unsupportedReply(info.unsupported)
+      : '（空消息）';
+    counts.incoming++;
+    try {
+      await deliver(info, note);
+      counts.ok++;
+      record('skip', info.key, 0, info.unsupported && info.unsupported.length
+        ? '不支持的消息类型：' + info.unsupported.join(',')
+        : '空消息');
+    } catch (e) {
+      counts.failed++;
+      enqueueOutbox(info, note, e);
+      record('fail', info.key, 0, '不支持/空消息提示入补发队列');
+      log('fail:note', info.kind, info.key, redactText(e.message));
+    }
+    return;
+  }
+
   // 命令（②）：本地命令当场处理、不进队列——否则 /stop 会排在自己要停的那一轮后面，
   // 永远等不到执行。只有 DSH 原生命令（/compact 等）才落到队列里透传。
   const parsed = parseCommand(info.text);
@@ -1253,12 +1332,22 @@ const server = http.createServer(async (req, res) => {
       const actionOnly = !reply && parsed.actions.length > 0;
       // 纯动作回复不发空消息；只有「模型真没内容且没有动作」时才保留旧的兜底文案。
       if (!reply && !actionOnly) reply = '（DSH 没有返回内容）';
+      // 群首次触发：披露 AI 身份与本群会话隔离；只发一次，纯动作轮不发。
+      if (reply && info.kind === 'group' && cfg.aiDisclosure && !disclosedChats.has(info.key)) {
+        disclosedChats.add(info.key);
+        reply += '\n\n' + disclosureText({
+          memberScoped: cfg.groupSessionScope === 'member',
+          groupReplyAt: cfg.groupReplyAt,
+        });
+      }
+      // 群回复 @ 提问者：只给第一条气泡，后续不重复 @。
+      const sendOpts = info.kind === 'group' && cfg.groupReplyAt ? { atUserId: info.userId } : undefined;
       // recall 只删这份；先取快照，避免本轮发完正文后被覆盖成 currentIds。
       const prevIds = lastBubbles.get(info.key) || [];
       let messageIds = [];
       try {
         if (reply) {
-          const sent = await deliverHuman(info, reply);
+          const sent = await deliverHuman(info, reply, sendOpts);
           if (sent.bubbles > 1) { counts.bubbles += sent.bubbles; lastPlan = { bubbles: sent.bubbles, chars: reply.length, at: Date.now() }; }
           messageIds = sent.messageIds || [];
         }

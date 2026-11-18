@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## v0.2.34
+- **P0-2 消息层**：新增 `units/bridge/message.mjs`，补齐旧版消息层的七项行为：
+  引用回复、`[表情]`、`[戳一戳]`、不支持类型提示、群回复 @、群首次 AI 身份披露、
+  群成员级会话
+- **引用回复**：收到 `reply` 段先调 NapCat `get_msg` 取被引用消息；能读到就把
+  「（引用回复 谁 的消息 「原话」）」拼在任务最前面，读不到明确写「引用消息不可读」，
+  不让模型猜。群里「回复机器人那条」且被引用消息 sender 是机器人时按 @ 处理，
+  不要求再单独 @
+- **表情 / 戳一戳**：`face`/`mface` → `[表情]`，`poke` → `[戳一戳]`，进提示词
+- **不支持类型**：`record`/`video`/`file`/`forward`/`json`/`xml`/`markdown`
+  记进 `unsupported`；只发这类消息时直接回「暂不支持语音/文件消息…」，不烧 DSH 回合；
+  文字 + 附件时在任务末尾注明「本轮还包含暂不支持的消息类型：…」
+- **群回复 @**：`send_group_msg` 的 `message` 用 CQ 字符串前缀
+  `[CQ:at,qq=<提问者>] `，只加在第一条气泡；补发队列里的回复不补 @
+- **首次披露**：按 chatKey 只发一次（成员级会话时每个成员一次）；纯动作轮没有正文，
+  不发披露。文案随成员级/每群一条变化
+- **成员级会话**：`BRIDGE_GROUP_SESSION_SCOPE=member` 时 key 变成
+  `group:<群号>:<QQ>`，同群两个人各自续自己的 DSH 会话；默认仍是每群一条
+- 配置：`BRIDGE_GROUP_REPLY_AT`、`BRIDGE_AI_DISCLOSURE`、`BRIDGE_GROUP_SESSION_SCOPE`；
+  `bin/run-bridge.sh` 与 `etc/tinda.conf.example` 已同步，面板加「消息层」一行
+- 测试：`test-message.mjs` 28 项纯函数；`test-roundtrip.mjs` 36 项（新增引用可读/不可读、
+  表情、戳、语音-only、群 @、首次披露、回复机器人算 @）；`test-headless.mjs` 15 项
+  （新增成员级会话两个 key）；其余 bridge 测试文件全部保持通过
+- 边界：图片仍只写 `[图片]`，没有下载/直传；流式、打断、熔断、会话归属仍未做。
+  引用只取文字/图片数，不下载引用里的图片；`get_msg` 失败按「不可读」降级
+
 ## v0.2.33
 - **P0-1b 修正 `[[recall]]` 语义**：P0-1 把它做成了「删本轮气泡」，模型说
   「正确的是 X + [[recall]]」时会把刚发的 X 也删掉。现在按聊天在内存里记

@@ -76,6 +76,14 @@ BRIDGE_INTERACTIONS_MAX=2
 # 动作总时限（毫秒，100–10000）；超时/失败都不影响正文。
 BRIDGE_INTERACTIONS_TIMEOUT_MS=2500
 
+# ---- 消息层（P0-2）----
+# 群回复是否 @ 提问者；0 = 不带 @（用户需要自己 @ 机器人）。
+BRIDGE_GROUP_REPLY_AT=1
+# 群首次触发时是否披露「我是 AI + 本群会话怎么隔离」；0 = 不披露。
+BRIDGE_AI_DISCLOSURE=1
+# 群会话范围：group = 每群一条；member = 每个成员一条（上下文互相隔离）。
+BRIDGE_GROUP_SESSION_SCOPE=group
+
 # ---- 输出档位与自动压缩（⑤）----
 # 默认档位：minimalist（只发总结）/ concise / detailed / complete
 BRIDGE_OUTPUT_DEFAULT=minimalist
