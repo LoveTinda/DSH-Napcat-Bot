@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## v0.2.39
+
+- **原版 legacy 的 OneBot WS 入站跑通**：假 OneBot WS 发私聊 → 假 dsh → 真实
+  `send_private_msg`，回复「WS 回合回复」；修了三处：
+  - `index.js` 和 `bridge.attach()` 重复注册 `handleEvent`，同一事件被处理两次
+  - `persona.deliverBurst` 把 `shouldStop` 当成 `isCurrent`，WS 路径永远不发正文
+  - `parseActions` 返回结构不对，导致回复正文被清空
+- 新增 `test/legacy-onebot.mjs`：最小 RFC6455 服务端，验证真实 WS 入站/出站
+- 同步修复到 `units/legacy/app/`；v0.2.37 的开机零动作/挂载安全层未改
+- 版本：v0.2.39 / versionCode 44
+- 验证：legacy-smoke / legacy-http / legacy-turn / legacy-onebot 全过；
+  `check-module` 0 FAIL/1 warn；selftest 通过
+
 ## v0.2.38
 
 - **原版 `napcat-dsh-bridge` 以 opt-in 单元接回**：`units/legacy/app/` 是从

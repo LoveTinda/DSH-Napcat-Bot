@@ -1,0 +1,53 @@
+{
+  "onebot": {
+    "mode": "forward-ws",
+    "url": "ws://127.0.0.1:3001",
+    "accessToken": "",
+    "reconnectMs": 3000
+  },
+  "dsh": {
+    "command": "dsh",
+    "profile": "qq",
+    "cwd": "",
+    "timeoutMs": 900000,
+    "maxConcurrent": 1,
+    "extraArgs": []
+  },
+  "admin": {
+    "host": "127.0.0.1",
+    "port": 6701
+  },
+  "panel": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 6702,
+    "writeEnabled": false
+  },
+  "policy": {
+    "privateChat": "allowlist",
+    "groupChat": "mention",
+    "allowUsers": [
+      "0"
+    ],
+    "allowGroups": [],
+    "ownerUsers": [
+      "0"
+    ],
+    "adminUsers": [],
+    "allowAllUsers": false,
+    "allowAllGroups": false,
+    "ignoreSelf": true
+  },
+  "behavior": {
+    "maxReplyChars": 4000,
+    "onBusy": "interrupt",
+    "aiDisclosure": true,
+    "downloadImages": true,
+    "humanize": {
+      "enabled": true
+    },
+    "interactions": {
+      "enabled": true
+    }
+  }
+}

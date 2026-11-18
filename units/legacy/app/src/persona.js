@@ -35,12 +35,12 @@ export function createPersona(humanize = {}, behavior = {}) {
       return target.burst.enabled ? '已在分气泡（' + (cfg.charsPerMinute || 220) + ' 字/分）' : '关闭';
     },
     hardSplit,
-    async deliverBurst(body, sendPart, isCurrent = () => true) {
+    async deliverBurst(body, sendPart, shouldStop = () => false) {
       const parts = partsOf(body);
       let sent = 0;
       let waitedMs = 0;
       for (const part of parts) {
-        if (!isCurrent()) break;
+        if (shouldStop()) break;
         await sendPart(part);
         sent += 1;
         if (target.burst.enabled && sent < parts.length) {

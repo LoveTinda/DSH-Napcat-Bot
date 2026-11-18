@@ -73,11 +73,11 @@ onebot.on('offline', () => {
   log.warn('OneBot 离线，回到待机');
 });
 onebot.on('event', (ev) => {
+  // bridge.attach() 已经注册了 handleEvent；这里只更新 status，避免同一事件被处理两次。
   if (ev && ev.self_id) {
     onebot.selfId = ev.self_id;
     status.update((v) => { v.onebot.selfId = ev.self_id; });
   }
-  bridge.handleEvent(ev).catch((err) => log.error('处理事件失败: ' + (err && err.stack || err)));
 });
 
 const inject = async (body = {}, meta = {}) => {
