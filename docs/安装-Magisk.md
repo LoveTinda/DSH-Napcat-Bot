@@ -55,6 +55,15 @@ proot 里 namespace id 不变，会保守失败，结果不可信；必须在 `s
 su -c 'cp /sdcard/Download/DSH-Go/tinda-mount-probe.sh /data/local/tmp/ && sh /data/local/tmp/tinda-mount-probe.sh'
 ```
 
+如果报「不支持 make-rprivate」，先别改 `TYPE=chroot`。可再跑传播诊断，确认这台 toybox
+到底支持哪种写法（同样不创建挂载）：
+
+```sh
+su -c 'sh /sdcard/Download/DSH-Go/tinda-prop-probe.sh'
+```
+
+只有输出里 `after` 行**没有 `shared:`** 的候选，才可能用于 chroot；否则保持 exec。
+
 ## 2. 刷入
 
 **刷完重启一次**让模块目录生效；它不会在开机阶段挂载或启动服务。按你的 root 方案选：

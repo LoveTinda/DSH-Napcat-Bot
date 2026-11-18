@@ -7,6 +7,10 @@
   bind/remount/umount。退出时检查宿主 `mountinfo` 无残留；失败关闭，只卸载自己建的路径。
 - 用途：在真机 root 下回答「这台能不能走 chroot」，不再靠猜；不改变模块运行时行为。
   proot 里 remount 会被拦截，结果不可信。v0.2.36 的 zip 未重打，先单独用下载目录里的脚本。
+- 新增 `bin/prop-probe.sh`：当 `--make-rprivate` 失败时，逐个尝试 toybox 的
+  `-o rprivate`/`-o remount,rprivate`/`-o private` 等写法，打印原始报错和
+  `/proc/self/mountinfo` 的根传播标志。只在私有 namespace 里改标志，不创建挂载；
+  只有 `after` 行没有 `shared:` 的候选才可能继续 chroot。
 
 ## v0.2.36
 - **启动/挂载安全重写（事故修复）**：v0.2.35 刷入后出现开机卡很久、系统服务/应用起不来。
