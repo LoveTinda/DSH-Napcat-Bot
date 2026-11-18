@@ -46,7 +46,7 @@ for (const f of files) {
   cfg.network = cfg.network || {};
   cfg.network.httpServers = [{
     name: "tinda-api", enable: true, port: apiPort, host: "127.0.0.1",
-    enableCors: true, enableWebsocket: false, messagePostFormat: "array", token, debug: false,
+    enableCors: true, enableWebsocket: true, messagePostFormat: "array", token, debug: false,
   }];
   cfg.network.httpClients = [{
     name: "tinda-bridge", enable: true, url: `http://${host}:${port}/`,

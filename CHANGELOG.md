@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## v0.2.38
+
+- **原版 `napcat-dsh-bridge` 以 opt-in 单元接回**：`units/legacy/app/` 是从
+  `dsh-backup-20261025-1230` 会话记录复原的原始桥接（`bridge.js` 2191 行完整）
+- 补齐缺失模块：`onebot.js`（正向 WS）、`store.js`、`persona.js`、`interactions.js`、
+  `auth.js`、`panel-config.js`、`export.js`、`state.js`、`audit.js`、`event-log.js`
+- 接回 `admin.js` / `panel.js` / `panel-sessions.js`：`/status`、`/inject`、`/command`、
+  只读仪表盘可用；原版完整 `panel-client` UI 仍有缺口，当前是简化页
+- 原版指令已实测：`/help`、`/status`、`/new`、`/sessions`、`/ping` 均返回 200；
+  假 dsh 的完整回合返回正确 `reply`/`sessionId`/`turns`
+- `napcat-wire-onebot.sh` 打开 3001 的 `enableWebsocket`，让原版正向 WS 能连；
+  HTTP API 仍可用，当前 `bridge` 不受影响
+- `units/legacy/unit.conf` 固定 `TYPE=exec`：不 chroot、不 mount；默认不启动，
+  v0.2.37 的开机零动作/私有 namespace 安全层完全不动
+- 新增 [docs/原版桥接.md](docs/原版桥接.md)；`legacy` 与 `bridge` 不能同时开（会双回复）
+- 版本：v0.2.38 / versionCode 43
+- 验证：`test/legacy-smoke.mjs`、`test/legacy-http.mjs`、`test/legacy-turn.mjs` 全过；
+  `unit.sh` 方式启动 legacy 后 admin/panel 均 200；`check-module` 0 FAIL/1 warn
+
 ## v0.2.37
 
 - **真机反馈修复**：v0.2.36 的探针在 Android toybox 上确认 namespace 隔离成功，但

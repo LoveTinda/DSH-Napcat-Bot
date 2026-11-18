@@ -135,3 +135,8 @@
 - 目录：originals/20261118-230451-mount-propagation-fallback
 - 清单：SHA256SUMS
 
+## 20261118-233540 — add-legacy-unit
+- 文件数：113
+- 目录：originals/20261118-233540-add-legacy-unit
+- 清单：SHA256SUMS
+

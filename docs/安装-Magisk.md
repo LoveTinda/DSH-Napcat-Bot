@@ -22,14 +22,14 @@
 ```sh
 cd /root/workspace/tinda-bot
 sh bin/check-module.sh      # 结构门禁：module.prop / shebang / CRLF / service.sh
-sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.37-magisk.zip
+sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.38-magisk.zip
 ```
 
 包内只含运行需要的东西（`module.prop`、四个脚本、`bin/ units/ contracts/ etc/ docs/` 与根文档），
 不含 `.runtime/`、`.git`、`originals/`、`local/`。当前产物：
 
-- `tinda-bot-v0.2.37-magisk.zip`（约 340 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
-- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.37-magisk.zip.sha256`（在 zip 所在目录）
+- `tinda-bot-v0.2.38-magisk.zip`（约 430 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
+- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.38-magisk.zip.sha256`（在 zip 所在目录）
 - 同目录有 `.sha256`，刷之前核一下
 
 ## 1.5 刷之前先跑最小挂载探针
@@ -69,10 +69,10 @@ su -c 'cp /sdcard/Download/DSH-Go/tinda-mount-probe.sh /sdcard/Download/DSH-Go/t
 
 ```sh
 # Magisk
-su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.37-magisk.zip'
+su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.38-magisk.zip'
 
 # KernelSU / SukiSU（同一个模块格式，目录也是 /data/adb/modules）
-su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.37-magisk.zip'
+su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.38-magisk.zip'
 ```
 
 也可以直接在 Magisk / KernelSU / SukiSU 的 App 里：**模块** → **从本地安装** → 选 zip → 重启。
@@ -98,7 +98,11 @@ KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子）
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start web'      # 控制台
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start bridge'   # QQ 桥接
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start napcat'   # 需要 QQ 时
+su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start legacy'   # 可选：原版完整桥接
 ```
+
+`legacy` 和 `bridge` **不要同时开**（会双回复）；它只跑宿主 node、不 chroot，
+第一次启动后要编辑 `$DATA/etc/legacy.json` 的白名单，详见 [原版桥接](原版桥接.md)。
 
 桥接依赖 NapCat 的 3001；Web 依赖桥接面板口。没有硬依赖，起早了只是暂时 502。
 

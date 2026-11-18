@@ -20,6 +20,8 @@ function jsFiles(dir) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
     if (ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
     const full = path.join(dir, ent.name);
+    // 原版 legacy 是独立应用，不参与本项目的契约实现扫描。
+    if (full.endsWith(path.join('units', 'legacy', 'app'))) continue;
     if (ent.isDirectory()) out.push(...jsFiles(full));
     else if (ent.isFile() && ent.name.endsWith('.js')) out.push(full);
   }

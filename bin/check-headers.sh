@@ -7,7 +7,8 @@ if [ -z "$MODDIR" ]; then
   MODDIR=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)
 fi
 bad=0
-for f in $(find "$MODDIR/bin" "$MODDIR/units" -type f \( -name '*.sh' -o -name '*.mjs' -o -name '*.js' \) 2>/dev/null); do
+# units/legacy/app 是恢复出来的上游原版代码，保留原字节；不复刻本项目的头注释规范。
+for f in $(find "$MODDIR/bin" "$MODDIR/units" -type f \( -name '*.sh' -o -name '*.mjs' -o -name '*.js' \) ! -path "$MODDIR/units/legacy/app/*" 2>/dev/null); do
   for k in 目的 边界 依赖 失败; do
     grep -q "$k：" "$f" || { echo "FAIL 缺 $k：$(basename "$f")"; bad=$((bad+1)); }
   done

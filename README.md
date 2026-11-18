@@ -32,7 +32,7 @@ Magisk 真机实测（当前跑在 App 的 Ubuntu 里）、`contracts/` 与实�
 module.prop        模块声明（Magisk 形态用）
 service.sh         开机按单元拉起
 bin/               启动、看守、门禁、备份、安装、诊断（含 check-contracts.mjs）
-units/             单元：napcat / bridge / web / dsh，各自 unit.conf + 入口
+units/             单元：napcat / bridge / web / dsh / legacy，各自 unit.conf + 入口
 contracts/         抽象接口契约（目标形态，当前未实现，检查器会如实告警）
 AGENTS.md          项目规范（人和 AI 的入口）
 RUNBOOK.md         运维手册：起停、排障、复查

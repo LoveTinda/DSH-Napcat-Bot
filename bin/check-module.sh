@@ -69,6 +69,8 @@ check_root() {
   grep -q 'mount --make-private' "$root/bin/unit.sh" && fail "unit.sh 仍有 make-private 回退（递归私有不成立）"
   grep -q 'mount -o bind /data/adb' "$root/bin/unit.sh" && fail "unit.sh 仍在 bind /data/adb（递归挂载）"
   grep -q '^TYPE=exec' "$root/units/napcat/unit.conf" || fail "napcat 必须是 TYPE=exec（Android QQ 不能进 glibc rootfs）"
+  grep -q '^TYPE=exec' "$root/units/legacy/unit.conf" || fail "legacy 必须是 TYPE=exec（不 chroot、不 mount）"
+  [ -f "$root/units/legacy/app/src/index.js" ] || fail "缺 legacy 入口 units/legacy/app/src/index.js"
   grep -q 'MODPATH' "$root/customize.sh" || note "customize.sh 没用到 MODPATH（安装期路径可能取错）"
 
   # 运行时（S-4）：模块本身不带 node；有 bin/node 就用，没有就要系统 PATH 里有
@@ -83,10 +85,12 @@ check_root() {
 if [ "${1:-}" = "--selftest" ]; then
   tmp=$(mktemp -d) || exit 1
   trap 'rm -rf "$tmp"' EXIT INT TERM
-  mkdir -p "$tmp/bin" "$tmp/units/napcat" "$tmp/etc"
+  mkdir -p "$tmp/bin" "$tmp/units/napcat" "$tmp/units/legacy/app/src" "$tmp/etc"
   cp "$MODDIR/module.prop" "$MODDIR/service.sh" "$MODDIR/customize.sh" "$MODDIR/uninstall.sh" "$tmp/"
   cp "$MODDIR/bin/unit.sh" "$MODDIR/bin/lib.sh" "$MODDIR/bin/make-private.sh" "$tmp/bin/"
   cp "$MODDIR/units/napcat/unit.conf" "$tmp/units/napcat/"
+  cp "$MODDIR/units/legacy/unit.conf" "$tmp/units/legacy/"
+  cp "$MODDIR/units/legacy/app/src/index.js" "$tmp/units/legacy/app/src/"
   cp "$MODDIR/etc/tinda.conf.example" "$tmp/etc/"
   chmod +x "$tmp"/*.sh "$tmp"/bin/*.sh
   _out=$(check_root "$tmp" 2>&1) || true
