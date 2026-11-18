@@ -68,6 +68,10 @@ check_root() {
   fi
   grep -q 'unit.sh' "$root/service.sh" || note "service.sh 没给手动启动示例"
   grep -q '^AUTO_START=' "$root/etc/tinda.conf.example" || fail "tinda.conf.example 缺 AUTO_START"
+  # 模块信息页：页面文件、网关路由、网关拿得到数据路径，缺一件就是白屏。
+  [ -f "$root/units/web/ui/module.html" ] || fail "缺 units/web/ui/module.html（模块信息页）"
+  grep -q '/module/data.json' "$root/units/web/gateway.mjs" || fail "网关没有 /module/ 路由"
+  grep -q 'TINDA_DATA' "$root/bin/run-web.sh" || fail "run-web.sh 没把 TINDA_DATA 传给网关"
   # chroot 必须有 namespace 校验 + 传播 helper，且不得再 bind /data/adb 祖先。
   grep -q 'unshare' "$root/bin/unit.sh" || fail "unit.sh 缺 unshare（chroot 会泄漏挂载）"
   grep -q 'TINDA_NS' "$root/bin/unit.sh" || fail "unit.sh 缺 namespace 校验（可能没隔离就 mount）"

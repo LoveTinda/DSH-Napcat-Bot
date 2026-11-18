@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.3.6
+
+- **新增模块信息页 `/module/`**（要 token）：版本/版本码、安装与数据目录、`AUTO_START`、
+  `web`/`bridge`/`napcat` 的 pid 与存活、web 的监听/证书 SAN 与到期/token 掩码与一键复制/
+  运行时长/内存/请求数/附加端口、三个下游在线状态、`web.log` 与 `supervisor.log` 末尾
+- 数据走 `/module/data.json`（实时读盘，页面 5 秒自刷）；`/module/token` 仅在已鉴权时
+  返回完整 token；导航页头部加「模块」入口
+- `action.sh` 起完 web 后直接 `am start` 打开 `/module/`——Magisk 里点「操作」就能看，
+  不必手动复制地址（Magisk 没有 WebUI 容器，所以走浏览器）
+- `run-web.sh` 导出 `TINDA_DATA`/`TINDA_MODDIR` 给网关读 module.prop、pid、日志；
+  chroot 里靠符号链接同样可达
+- 版本：v0.3.6 / versionCode 55
+- 验证：本机 8443 上 `/module/` 200（含标题）、`/module/data.json` 200 且版本/单元/证书/
+  下游齐全、`/module/token` 返回的 token 与文件一致、无 cookie 时 401
+
 ## v0.3.5
 
 - **刷完即用，不用先重启**：`customize.sh` 在安装结束前从暂存目录（`$MODPATH`）直接

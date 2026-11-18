@@ -1,6 +1,6 @@
 id=tinda-bot
 name=Tinda Bot
-version=v0.3.5
-versionCode=54
+version=v0.3.6
+versionCode=55
 author=tinda
-description=QQ <-> DSH 桥接器的原生运行载体：刷完即起 web 控制台（不用先重启）、开机自启 web（AUTO_START=web）、Magisk「操作」按钮一键起面板并打印地址与 token、单元启动 ~0.4 秒、单应用 app/、bridge 走 DSH App proot 独立 node、web 可选 chroot 私有挂载。无 Zygisk、无进程注入。
+description=QQ <-> DSH 桥接器模块：带模块信息页（/module/，看版本/单元/证书/token/日志）、刷完即起 web 控制台、开机自启 web、Magisk「操作」一键起面板并打开浏览器、单元启动 ~0.4 秒、单应用 app/、bridge 走 DSH App proot 独立 node。无 Zygisk、无进程注入。

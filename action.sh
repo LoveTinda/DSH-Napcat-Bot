@@ -20,7 +20,15 @@ TOKEN=$(cat "$DATA/secrets/web.token" 2>/dev/null)
 
 echo ""
 if [ -n "$TOKEN" ]; then
+  URL="https://${IP:-<手机IP>}:$PORT/module/?k=$TOKEN"
+  echo "模块信息：$URL"
   echo "控制台：https://${IP:-<手机IP>}:$PORT/?k=$TOKEN"
+  # Magisk 没有 WebUI 容器，直接拉起浏览器；失败也不影响面板已经起来。
+  if command -v am >/dev/null 2>&1; then
+    am start --user 0 -a android.intent.action.VIEW -d "$URL" >/dev/null 2>&1 \
+      && echo "（已用浏览器打开模块信息页）" \
+      || echo "（自动打开失败：手动复制上面的地址）"
+  fi
 else
   echo "还没生成 token：先看 $DATA/logs/web.log"
 fi

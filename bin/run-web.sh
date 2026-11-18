@@ -60,6 +60,10 @@ if [ "$_cert_ok" -ne 1 ] && command -v openssl >/dev/null 2>&1; then
   chmod 600 "$KEY" "$CERT" 2>/dev/null
 fi
 
+# 模块信息页要读 module.prop / 配置 / pid / 日志；chroot 里这些路径同样可达
+# （/data/adb/tinda-bot 是指向 /var/tinda 的符号链接，模块目录是指向 /opt/tinda-bot 的）。
+export TINDA_DATA="$DATA"
+export TINDA_MODDIR="$MODDIR"
 export WEB_TOKEN="$(cat "$TOKEN_FILE")"
 export WEB_BIND="$(conf_get WEB_BIND 0.0.0.0)"
 export WEB_PORT="$(conf_get WEB_PORT 8443)"

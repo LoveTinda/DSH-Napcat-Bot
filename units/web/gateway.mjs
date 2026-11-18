@@ -85,7 +85,8 @@ const LANDING = `<!doctype html><meta charset="utf-8"><title>Tinda</title>
 <h2>Tinda 入口</h2>
 <a href="/dsh/">DSH 控制台</a>
 <a href="/bridge/">桥接器面板</a>
-<a href="/napcat/">NapCat WebUI</a>`;
+<a href="/napcat/">NapCat WebUI</a>
+<a href="/module/">模块信息（版本 / 单元 / 证书 / 日志）</a>`;
 
 /** 目的：常量时间比较 token，避免按字符提前返回带来的时序差异。 */
 function tokenEquals(a, b) {
@@ -170,6 +171,104 @@ function serveUi(res) {
   }
   res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
   res.end(LANDING);
+}
+
+// ---- 模块信息页（/module/）----
+// 目的：把模块与 web 的运行态集中成一页：版本、路径、开机自启、各单元 pid、
+//       监听/证书/token/上游/内存/请求数，以及两份日志尾部；数据实时读盘。
+const TINDA_DATA = process.env.TINDA_DATA || '/data/adb/tinda-bot';
+const TINDA_MODDIR = process.env.TINDA_MODDIR || '/opt/tinda-bot';
+const STARTED_AT = Date.now();
+let REQ_COUNT = 0;
+
+function readText(file, max) {
+  try { return fs.readFileSync(file, 'utf8').slice(0, max || 65536); } catch { return ''; }
+}
+
+function moduleProp() {
+  const out = {};
+  for (const line of readText(path.join(TINDA_MODDIR, 'module.prop'), 8192).split('\n')) {
+    const i = line.indexOf('=');
+    if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return out;
+}
+
+function confValue(key, dflt) {
+  const text = readText(path.join(TINDA_DATA, 'etc', 'tinda.conf'), 65536);
+  if (!text.includes(key + '=')) return dflt;
+  for (const line of text.split('\n')) {
+    if (line.startsWith(key + '=')) return line.slice(key.length + 1).trim();
+  }
+  return dflt;
+}
+
+function unitState(name) {
+  const pid = Number(readText(path.join(TINDA_DATA, 'run', name + '.pid'), 64).trim());
+  let alive = false;
+  if (Number.isInteger(pid) && pid > 0) {
+    try { process.kill(pid, 0); alive = true; } catch (err) { alive = err.code === 'EPERM'; }
+  }
+  return { pid: pid || null, alive };
+}
+
+function certInfo() {
+  if (!useTls) return null;
+  try {
+    const c = new crypto.X509Certificate(fs.readFileSync(TLS_CERT));
+    return { san: String(c.subjectAltName || '').split(',').join(', '), validTo: c.validTo };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+function tailLog(name, lines) {
+  const text = readText(path.join(TINDA_DATA, 'logs', name), 262144);
+  if (!text) return [];
+  return text.trimEnd().split('\n').slice(-(lines || 12));
+}
+
+async function moduleData() {
+  const prop = moduleProp();
+  const tok = readText(path.join(TINDA_DATA, 'secrets', 'web.token'), 128).trim();
+  const ups = await Promise.all(Object.entries(UPSTREAMS).map(async (pair) => {
+    const p = pair[0], v = pair[1];
+    return { path: p, port: v.port, up: await probe('http://' + v.host + ':' + v.port + v.health) };
+  }));
+  const confFile = path.join(TINDA_DATA, 'etc', 'tinda.conf');
+  return {
+    module: {
+      id: prop.id || 'tinda-bot', name: prop.name || 'Tinda Bot',
+      version: prop.version || '?', code: prop.versionCode || '?',
+      desc: prop.description || '', dir: TINDA_MODDIR, data: TINDA_DATA, conf: confFile,
+      autoStart: readText(confFile, 65536).includes('AUTO_START=') ? (confValue('AUTO_START', '') || '（空 = 不自启）') : 'web（缺省）'
+    },
+    web: {
+      bind: BIND, port: PORT, tls: useTls, cert: certInfo(),
+      tokenMask: tok ? tok.slice(0, 4) + '…' + tok.slice(-4) : '（还没有）',
+      tokenFile: path.join(TINDA_DATA, 'secrets', 'web.token'),
+      uptime: Math.round((Date.now() - STARTED_AT) / 1000),
+      node: process.version, rssMB: Math.round(process.memoryUsage().rss / 1048576),
+      requests: REQ_COUNT, upstreams: ups,
+      originDsh: ORIGIN_PORTS.dsh, originNapcat: ORIGIN_PORTS.napcat,
+      redirect: Number(process.env.WEB_REDIRECT_PORT || 0),
+      plain: Number(process.env.WEB_HTTP_PORT || 0)
+    },
+    units: { web: unitState('web'), bridge: unitState('bridge'), napcat: unitState('napcat') },
+    logs: { web: tailLog('web.log'), supervisor: tailLog('supervisor.log') }
+  };
+}
+
+function serveModulePage(res) {
+  const body = readText(path.join(import.meta.dirname, 'ui', 'module.html'), 262144);
+  res.writeHead(body ? 200 : 500, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+  res.end(body || 'module.html 缺失');
+}
+
+async function serveModuleData(res) {
+  const data = await moduleData();
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(data));
 }
 
 // ---- NapCat 面板免登录 ----
@@ -395,6 +494,7 @@ function createServer(handler) {
 }
 
 const handler = (req, res) => {
+  REQ_COUNT += 1;
   const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
 
   // 用 ?k=<token> 首次进入时种 cookie；之后 iframe/子端口都靠 cookie。
@@ -428,6 +528,20 @@ const handler = (req, res) => {
 
   // 状态接口：导航页的点亮/熄灭靠它
   if (url.pathname === '/_/status') return probeAll(res);
+
+  // 模块信息页：版本、路径、AUTO_START、单元 pid、web 证书/token、日志尾部
+  if (url.pathname === '/module') { res.writeHead(308, { location: '/module/' }); return res.end(); }
+  if (url.pathname === '/module/') return serveModulePage(res);
+  if (url.pathname === '/module/data.json') {
+    return serveModuleData(res).catch((err) => {
+      res.writeHead(500, { 'content-type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ error: err.message }));
+    });
+  }
+  if (url.pathname === '/module/token') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(JSON.stringify({ token: TOKEN }));
+  }
 
   // 反代
   // NapCat 的 WebUI 是 SPA，前端资源用绝对路径 /webui/assets/…（不带 /napcat 前缀）。
