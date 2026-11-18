@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.3.9
+
+- **web 默认也走 proot**：和 bridge 统一运行时——有 DSH App 的 `libproot.so` + runtime rootfs
+  就在里面跑网关（rootfs 自带 node/openssl），宿主不需要装 node；探测不到才退回宿主 node，
+  都不可用才 78。新增 `WEB_RUNTIME=auto|proot|host`，默认 `auto`（proot 优先）
+- 启动日志会写明实际运行时：`web 运行时：DSH proot（…/rootfs）` 或 `探测不到 DSH proot，
+  退回宿主 node`
+- 版本：v0.3.9 / versionCode 58
+- 验证：本机（无 proot）走 `auto` 时打印「退回宿主 node」并正常起网关；`PATH` 去掉 node
+  且无 proot 时 78 并给出可读原因
+
 ## v0.3.8
 
 - **web 不再要求宿主有 node**：真机 root 下 `PATH` 里通常没有 node，之前 `run-web.sh`

@@ -12,22 +12,33 @@ ensure_dirs
 
 NODE="$MODDIR/bin/node"; [ -x "$NODE" ] || NODE=$(command -v node)
 
-# 宿主没有 node（真机 root 下很常见）就借 DSH App 的 proot 运行时。
-# 只把模块目录与 $DATA 原路径 bind 进去，rootfs 里有 node 和 openssl，脚本不用改。
-if [ -z "$NODE" ] && [ "${TINDA_IN_PROOT:-0}" != "1" ]; then
-  . "$MODDIR/bin/lib-proot.sh"
-  if proot_detect; then
-    log warn "宿主没有 node，改用 DSH App 的 proot 运行时：$PROOT_ROOTFS"
-    exec "$PROOT_BIN" --kill-on-exit -0 --rootfs="$PROOT_ROOTFS" --cwd=/root \
-      -b /dev -b /proc -b /sys -b /system -b /apex \
-      -b "$MODDIR:$MODDIR" -b "$DATA:$DATA" \
-      /usr/bin/env TINDA_IN_PROOT=1 PATH=/usr/local/bin:/usr/bin:/bin \
-      /bin/sh "$MODDIR/bin/run-web.sh"
-  fi
-  log error "缺 node：宿主 PATH 没有，DSH App 的 proot 也不可用（见 PROOT_* 配置）"
-  exit 78
-fi
-[ -n "$NODE" ] || { log error "缺 node（proot 内也没找到）"; exit 78; }
+# 运行时选择：默认 proot 优先（和 bridge 一致，宿主不需要装 node；rootfs 里有 node+openssl）。
+#   WEB_RUNTIME=auto  → 能探测到 DSH proot 就用 proot，否则退回宿主 node（默认）
+#   WEB_RUNTIME=proot → 必须用 proot，探测不到就 78
+#   WEB_RUNTIME=host  → 只用宿主 node
+WEB_RUNTIME=$(conf_get WEB_RUNTIME auto)
+case "$WEB_RUNTIME" in
+  host) : ;;
+  proot|auto|*)
+    if [ "${TINDA_IN_PROOT:-0}" != "1" ]; then
+      . "$MODDIR/bin/lib-proot.sh"
+      if proot_detect; then
+        log info "web 运行时：DSH proot（$PROOT_ROOTFS）"
+        exec "$PROOT_BIN" --kill-on-exit -0 --rootfs="$PROOT_ROOTFS" --cwd=/root \
+          -b /dev -b /proc -b /sys -b /system -b /apex \
+          -b "$MODDIR:$MODDIR" -b "$DATA:$DATA" \
+          /usr/bin/env TINDA_IN_PROOT=1 PATH=/usr/local/bin:/usr/bin:/bin \
+          /bin/sh "$MODDIR/bin/run-web.sh"
+      fi
+      if [ "$WEB_RUNTIME" = "proot" ]; then
+        log error "WEB_RUNTIME=proot，但探测不到 DSH proot（见 PROOT_* 配置）"
+        exit 78
+      fi
+      log warn "探测不到 DSH proot，退回宿主 node"
+    fi
+    ;;
+esac
+[ -n "$NODE" ] || { log error "缺 node：宿主 PATH 没有，DSH proot 也不可用（见 PROOT_*）"; exit 78; }
 
 TOKEN_FILE="$DATA/secrets/web.token"
 # 空文件也算没有：网关会拒绝空 token 启动，所以这里必须把空文件补成真 token。

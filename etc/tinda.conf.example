@@ -141,6 +141,9 @@ PROOT_PKG=io.github.ccch1mneyyy.dsh_app
 PROOT_BIN=
 # 空 = /data/user/0/$PROOT_PKG/files/runtime/rootfs（里面要有 /usr/local/bin/node）
 PROOT_ROOTFS=
+# web 网关的运行时：auto = 有 DSH proot 就用 proot，否则退回宿主 node；proot = 必须 proot；
+# host = 只用宿主 node。默认 proot 优先，和 bridge 保持一致，宿主不用装 node。
+WEB_RUNTIME=auto
 
 # ---- DSH 后端 ----
 DSH_NODE=
