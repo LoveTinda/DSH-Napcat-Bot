@@ -44,12 +44,12 @@ check_root() {
     grep -q "$CR" "$f" && fail "$(basename "$f") 含 CRLF"
   done
 
-  # 单元声明：TYPE 只允许这四种；写错会让 unit.sh 在开机时退出 78，而且日志在模块目录里看不到
+  # 单元声明：TYPE 只允许这五种；写错会让 unit.sh 在开机时退出 78，而且日志在模块目录里看不到
   for c in $(find "$root/units" -name 'unit.conf' 2>/dev/null); do
     _t=$(sed -n 's/^TYPE=//p' "$c" | head -1)
     case "$_t" in
-      exec|chroot|external|auto) ;;
-      *) fail "$(basename "$(dirname "$c")")/unit.conf 的 TYPE='$_t' 非法（exec|chroot|external|auto）" ;;
+      exec|proot|chroot|external|auto) ;;
+      *) fail "$(basename "$(dirname "$c")")/unit.conf 的 TYPE='$_t' 非法（exec|proot|chroot|external|auto）" ;;
     esac
   done
   grep -q 'module.log' "$root/service.sh" || note "service.sh 没写 module.log，刷完出问题不好查"
@@ -69,7 +69,7 @@ check_root() {
   grep -q 'mount --make-private' "$root/bin/unit.sh" && fail "unit.sh 仍有 make-private 回退（递归私有不成立）"
   grep -q 'mount -o bind /data/adb' "$root/bin/unit.sh" && fail "unit.sh 仍在 bind /data/adb（递归挂载）"
   grep -q '^TYPE=exec' "$root/units/napcat/unit.conf" || fail "napcat 必须是 TYPE=exec（Android QQ 不能进 glibc rootfs）"
-  grep -q '^TYPE=exec' "$root/units/bridge/unit.conf" || fail "bridge 必须是 TYPE=exec（不 chroot、不 mount）"
+  grep -q '^TYPE=proot' "$root/units/bridge/unit.conf" || fail "bridge 必须是 TYPE=proot（独立 node，不 chroot、不 mount）"
   [ -f "$root/app/src/index.js" ] || fail "缺单应用入口 app/src/index.js"
   grep -q 'MODPATH' "$root/customize.sh" || note "customize.sh 没用到 MODPATH（安装期路径可能取错）"
 

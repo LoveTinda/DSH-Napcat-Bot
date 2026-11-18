@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## v0.3.1
+
+- **bridge 改为 proot 独立 node**：`units/bridge/unit.conf` 从 `TYPE=exec` 改为
+  `TYPE=proot`，由 `bin/run-app-proot.sh` 复用 DSH App 的 `lib/arm64/libproot.so`
+  和 `files/runtime/rootfs` 启动；不 chroot、不 mount。proot 进程仍由 root 启动，`-0`
+  只是 guest 假 root，不是降权
+- 只 bind 运行必需面：`/dev /proc /sys /system /apex`、模块 `app/`、`$DATA/state/app`、
+  `$DATA/etc/app.json`、从 `headless` 复制的 `qq` profile；**不 bind `/data`、`/sdcard`**
+- `-0` 是 proot guest 假 root，不是降权；找不到 proot/rootfs/node、建不了 guest
+  目录都退出 78，**不回退宿主 exec**
+- 新增 `PROOT_PKG` / `PROOT_BIN` / `PROOT_ROOTFS` 配置；`qq` profile 从 `headless`
+  复制并补 `credentials/authorization/deepseek-account`，不覆盖 rootfs 已有的 qq
+- `unit.sh` 支持 `TYPE=proot`；`bin/run-bridge.sh` 兼容入口也转到 proot
+- 启动仍手动，`service.sh` 零动作；v0.2.37 的 namespace/chroot 安全层未改
+- 版本：v0.3.1 / versionCode 50
+- 验证：假 proot 验证参数与 qq profile bind；缺 proot 时 exit 78；`unit.sh explain bridge`
+  显示 `TYPE=proot`；app/test 7 个测试与模块门禁见提交。真实 Android + DSH App rootfs
+  联调还没做
+- 注意：proot 不是安全沙箱；它只做假 root/路径映射，bind 进来的目录仍可读写
 ## v0.3.0
 
 - **单应用合并（阶段一）**：桥接运行时改为根目录 `app/`，由 `bridge` 单元启动；

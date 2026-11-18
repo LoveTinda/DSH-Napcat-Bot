@@ -4,8 +4,11 @@ QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，�
 所有改动进 git，每次更新落一份完整备份到 `/sdcard/backup/`。
 
 > Magisk 模块从 v0.2.36 起**默认不自动启动**：开机只建目录/写日志，不 mount、不 chroot、不起服务；
-> 需要时手动 `unit.sh start`。chroot 只在私有 mount namespace 里挂最小目录；toybox 不认
-> `--make-rprivate` 时用 `make-private.sh` 探测「无 shared」的回退，见 [ADR-0008](docs/adr/0008-启动与挂载安全.md)。
+> 需要时手动 `unit.sh start`。桥接是 `TYPE=proot`：复用 DSH App 的 `libproot.so` +
+> `runtime/rootfs` 跑独立 node；proot 进程仍由 root 启动，`-0` 只是 guest 假 root，
+> 不是降权。找不到就 78，不回落宿主；
+> chroot 只留给 `web`，且只在私有 mount namespace 里挂最小目录，见 [ADR-0008](docs/adr/0008-启动与挂载安全.md)
+> 和 [ADR-0010](docs/adr/0010-proot启动.md)。
 
 **现在能做什么**：QQ 私聊/群聊发消息 → 桥接器 → `dsh headless` → 回到 QQ；
 网页控制台看桥接器面板（概览 / 会话 / 事件 / 只读配置）；每轮续接同一个 DSH 会话；

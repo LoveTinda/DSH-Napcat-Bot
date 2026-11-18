@@ -101,8 +101,11 @@ su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start napcat'   # 需要 QQ �
 ```
 
 只有一个桥接：`bridge` 单元启动 `app/`（原版会话/工作区/模型/面板 + 当前安全层），
-不再有 `legacy` 并行单元。它只跑宿主 node、不 chroot；第一次启动后要编辑
-`$DATA/etc/app.json` 的白名单，详见 [单应用桥接](原版桥接.md)。
+不再有 `legacy` 并行单元。它是 `TYPE=proot`：用 DSH App 的 `libproot.so` 和
+`runtime/rootfs` 加载独立 node，不 chroot、不 mount；但 proot 进程仍由 root 启动，
+`-0` 只是 guest 假 root，不是降权。找不到 proot/rootfs 会 78，不回落宿主。
+第一次启动后要编辑 `$DATA/etc/app.json`
+的白名单，详见 [单应用桥接](原版桥接.md)。
 
 桥接依赖 NapCat 的 3001；Web 依赖桥接面板口。没有硬依赖，起早了只是暂时 502。
 
@@ -121,10 +124,12 @@ su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'
 ## 5. 运行时从哪来（刷之前必须决定）
 
 模块只有 shell 和 JS，**不带 node**；NapCat/QQ 是 Android bionic 程序，**永远宿主直装**。
-桥接/网关支持 `TYPE=auto`：只有同时满足「有 `/data/adb`、有 rootfs、`unshare -m` 探针通过」
-才走 chroot；否则退回宿主直装（proot 里就是这样）。chroot 是显式能力，不是刷入即默认。
+`bridge` 是 `TYPE=proot`：用 DSH App 的 `libproot.so` + `runtime/rootfs` 里的 node
+跑独立进程，不要求 Android 宿主有 node；找不到 proot/rootfs 直接 78，不回落宿主。
+`web` 仍是 `TYPE=auto`：只有同时满足「有 `/data/adb`、有 rootfs、`unshare -m` 探针通过」
+才走 chroot；否则退回宿主直装。chroot 是显式能力，不是刷入即默认。
 
-### 5.1 准备 rootfs
+### 5.1 准备 rootfs（web/chroot 用；bridge 直接用 DSH App 的 rootfs）
 
 ```sh
 # 看现状：rootfs 在不在、里面的 node/npm/dsh 有没有、每个单元会怎么起
@@ -170,14 +175,15 @@ su -c "chroot /data/adb/tinda-bot/rootfs /bin/bash -lc 'npm i -g @deepseek-ai/ds
 然后把 `/data/adb/tinda-bot/etc/tinda.conf` 的 `DSH_BIN` 指到 rootfs 内的 DSH 入口
 （`chroot ... which dsh` 查），重启单元。
 
-### 5.3 确认真的走了 chroot
+### 5.3 确认启动方式
 
 ```sh
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh explain bridge'
-# 期望：bridge: TYPE=auto → chroot:/data/adb/tinda-bot/rootfs
-# 若显示 exec：unshare/rootfs 探针没过，退回宿主直装（安全优先，不硬上）
-su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --check'
-su -c 'tail -20 /data/adb/tinda-bot/logs/module.log'   # 每行会写「启动方式 chroot/exec」
+# 期望：bridge: TYPE=proot → proot
+# 若启动报「找不到 proot/rootfs」：检查 DSH App 是否安装、rootfs 是否有 /usr/local/bin/node
+su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh explain web'
+# web 才可能是 chroot；显示 exec 表示 unshare/rootfs 探针没过
+su -c 'tail -20 /data/adb/tinda-bot/logs/module.log'
 ```
 
 chroot 启动时 `unit.sh` 会在**私有 mount namespace** 里挂：`/proc`、`/dev`、`/sys`（只读）、

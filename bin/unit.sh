@@ -19,8 +19,8 @@ load() {
   RESTART_MAX=${RESTART_MAX:-10}
   BACKOFF_MAX=${BACKOFF_MAX:-60}
   case "$TYPE" in
-    exec|chroot|external|auto) ;;
-    *) log error "$u: TYPE=$TYPE 不认识（exec|chroot|external|auto）"; exit 78 ;;
+    exec|proot|chroot|external|auto) ;;
+    *) log error "$u: TYPE=$TYPE 不认识（exec|proot|chroot|external|auto）"; exit 78 ;;
   esac
   mkdir -p "$STATE_DIR"
 }
@@ -75,7 +75,7 @@ find_unit_pids() {
 }
 
 # 目的：算出这个单元实际该怎么起——exec（宿主直装）还是 chroot（Magisk 下的 Linux rootfs）。
-# 输入：无（读 $TYPE、/data/adb、rootfs、unshare 是否存在）；输出："exec" 或 "chroot:<rootfs>"。
+# 输入：无（读 $TYPE、/data/adb、rootfs、unshare 是否存在）；输出："exec"、"proot" 或 "chroot:<rootfs>"。
 # 失败：显式 chroot 但 rootfs 不存在 → 仍输出 chroot:<路径>，由 spawn 报 78（失败关闭）。
 # 副作用：无。
 # 目的：判断当前 Android 环境有没有 unshare；没有就不进 chroot，避免挂载泄漏。
@@ -102,7 +102,7 @@ chroot_usable() {
 resolve_mode() {
   _rf=${TINDA_ROOTFS:-/data/adb/tinda-bot/rootfs}
   case "$TYPE" in
-    exec|external) echo "$TYPE" ;;
+    exec|proot|external) echo "$TYPE" ;;
     chroot) echo "chroot:$_rf" ;;
     auto)
       # 判据是「Android root + 有 rootfs + unshare/namespace/传播探针通过」；proot 里 /data/adb 不存在，自然退回 exec。
@@ -212,6 +212,7 @@ spawn() {
   _mode=$(resolve_mode)
   case "$_mode" in
     exec) log info "$NAME: 启动方式 exec（宿主直装）"; spawn_exec ;;
+    proot) log info "$NAME: 启动方式 proot（独立 node，假 root）"; spawn_exec ;;
     chroot:*) log info "$NAME: 启动方式 chroot（rootfs=$_mode）"; spawn_chroot "${_mode#chroot:}" ;;
     external) log info "$NAME: 外部单元，由 DSH 自己托管"; return 0 ;;
     *) log error "$NAME: 未知启动方式 $_mode"; return 78 ;;
