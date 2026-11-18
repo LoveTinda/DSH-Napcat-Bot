@@ -16,21 +16,29 @@ case "$UNITS" in
   ''|off|none|0) log info "boot-start: AUTO_START 为空或关闭，不启动任何单元"; exit 0 ;;
 esac
 
-# 只在 Android 上等开机完成；开发机/容器里没有 getprop，直接跳过，免得白等 90 秒。
-if [ -d /data/adb ] && command -v getprop >/dev/null 2>&1; then
-  log info "boot-start: 等待 sys.boot_completed（最多 90 秒）"
-  _i=0
-  while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
-    _i=$((_i + 1))
-    if [ "$_i" -ge 45 ]; then
-      log warn "boot-start: 等不到 sys.boot_completed，继续启动"
-      break
-    fi
-    sleep 2
-  done
+# 需要等开机完成的只有会碰网络/QQ 的单元；web 只是 bind 端口，开机瞬间就能起。
+# 只配了 web 时直接跳过等待——面板能早几秒打开，这就是用户能感知到的启动速度。
+_need_wait=0
+case " $UNITS " in
+  *" napcat "*|*" bridge "*) _need_wait=1 ;;
+esac
+if [ "$_need_wait" -eq 1 ] && [ -d /data/adb ] && command -v getprop >/dev/null 2>&1; then
+  if [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; then
+    log info "boot-start: 等待 sys.boot_completed（最多 20 秒）"
+    _i=0
+    while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
+      _i=$((_i + 1))
+      if [ "$_i" -ge 20 ]; then
+        log warn "boot-start: 等不到 sys.boot_completed，继续启动"
+        break
+      fi
+      sleep 1
+    done
+  fi
 fi
 
 log info "boot-start: 开机自启列表：$UNITS"
+# 并行拉起：多单元时总耗时取最慢的一个，而不是相加。
 for _u in $UNITS; do
   case "$_u" in
     ''|*[!a-z0-9_-]*) log warn "boot-start: 跳过非法单元名 '$_u'"; continue ;;
@@ -40,8 +48,11 @@ for _u in $UNITS; do
     log warn "boot-start: 没有这个单元：$_u"
     continue
   fi
-  _out=$(MODDIR="$MODDIR" DATA="$DATA" sh "$MODDIR/bin/unit.sh" start "$_u" 2>&1 | tail -3)
-  log info "boot-start: $_u: $(printf '%s' "$_out" | tr '\n' ' ')"
+  (
+    _out=$(MODDIR="$MODDIR" DATA="$DATA" sh "$MODDIR/bin/unit.sh" start "$_u" 2>&1 | tail -3)
+    log info "boot-start: $_u: $(printf '%s' "$_out" | tr '\n' ' ')"
+  ) &
 done
+wait
 log info "boot-start: 结束"
 exit 0

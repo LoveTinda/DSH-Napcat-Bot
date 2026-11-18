@@ -63,12 +63,19 @@ conf_get() {
 conf_sync() {
   [ -f "$CONF" ] && [ -f "$MODDIR/etc/tinda.conf.example" ] || return 0
   _added=0
+  # 先把已有键一次性读出来。旧实现每行都 fork 一次 printf/cut/tr + grep，
+  # 150 行的模板在手机上要 2 秒——而 ensure_dirs 每次启动单元都会走一遍。
+  _keys=$(sed -n 's/^\([A-Za-z0-9_]*\)=.*/\1/p' "$CONF" 2>/dev/null | tr '\n' ' ')
+  _cr=$(printf '\r')
   while IFS= read -r _line; do
+    _line=${_line%$_cr}
     case "$_line" in ''|'#'*) continue ;; esac
-    _key=$(printf '%s' "$_line" | cut -d= -f1 | tr -d '\r')
+    case "$_line" in *=*) ;; *) continue ;; esac
+    _key=${_line%%=*}
     case "$_key" in ''|*[!A-Za-z0-9_]*) continue ;; esac
-    grep -qE "^$_key=" "$CONF" && continue
+    case " $_keys " in *" $_key "*) continue ;; esac
     printf '\n# 由 bin/lib.sh 从 example 补的缺省值\n%s\n' "$_line" >> "$CONF" || break
+    _keys="$_keys $_key"
     _added=$((_added + 1))
   done < "$MODDIR/etc/tinda.conf.example"
   [ "$_added" -gt 0 ] && log warn "配置补了 $_added 个缺省键：$CONF"

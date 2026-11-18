@@ -250,7 +250,13 @@ do_start() {
     rm -f "$PID_FILE"
   ) >/dev/null 2>&1 &
   echo $! > "$PID_FILE"
-  sleep 1
+  # 启动确认：进程一起来就返回，不再固定 sleep 1（手机上这 1 秒是白等的）。
+  _i=0
+  while [ "$_i" -lt 10 ]; do
+    running && break
+    _i=$((_i + 1))
+    sleep 0.1 2>/dev/null || { sleep 1; break; }
+  done
   running && log info "$NAME 已启动 pid=$(cat "$PID_FILE")" || log warn "$NAME 未确认运行，见 $LOG_FILE"
 }
 

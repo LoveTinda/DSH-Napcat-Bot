@@ -30,8 +30,17 @@ log "service.sh 启动：MODDIR=$MODDIR"
 # 开机自启：等待 boot_completed 和逐个拉起单元都放在后台的 boot-start.sh 里，
 # service.sh 只负责 fork 出去，自己立刻退出——旧版在这里最多等 180 秒 + 20 秒，
 # 在 service.sh 早于 boot_completed 执行的设备上会直接拖住开机。
-# AUTO_START 为空 / off / none / 0 = 回到「开机零动作」，只手动起。
-_auto=$(grep -E '^AUTO_START=' "$DATA/etc/tinda.conf" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+#
+# 升级兼容：旧配置里没有 AUTO_START 这个键。缺键必须当成默认的 web，而不是「关」——
+# 否则从 v0.3.1 升上来的人刷完新版、重启，照样什么都没有（v0.3.2 就栽在这）。
+# 只有显式写空 / off / none / 0 才是「开机零动作」。
+if grep -q '^AUTO_START=' "$DATA/etc/tinda.conf" 2>/dev/null; then
+  _auto=$(grep -E '^AUTO_START=' "$DATA/etc/tinda.conf" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')
+else
+  _auto=web
+  printf '\nAUTO_START=web\n' >> "$DATA/etc/tinda.conf" 2>/dev/null
+  log "配置里没有 AUTO_START，已补默认值 web"
+fi
 case "$_auto" in
   ''|off|none|0)
     log "开机自启：关闭（AUTO_START 为空或 off）"

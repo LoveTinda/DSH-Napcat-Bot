@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.3.4
+
+- **启动提速（实测 `unit.sh start web` 2.4s → 0.4s，`boot-start.sh` 0.6s 返回）**：
+  - `ensure_dirs` 里的配置补键不再每行 fork `printf|cut|tr` + `grep`（150 行模板手机上要 2 秒），
+    改成先一次性读出已有键再比对：2094ms → 22ms
+  - `unit.sh` 启动确认从固定 `sleep 1` 改成 100ms 轮询，进程起来就返回
+  - `boot-start.sh`：只配 `web` 时不等 `sys.boot_completed`（bind 端口不需要）；含
+    `napcat`/`bridge` 时最多等 20 秒；多单元改为并行拉起
+- **修升级路径**：旧配置里没有 `AUTO_START` 这个键时，service.sh 原来按「空」处理 = 不启动，
+  从 v0.3.1 升上来的人刷完新版重启还是空白；现在缺键按默认 `web` 处理并补写进配置，
+  只有显式写 `off` 才是零动作
+- 版本：v0.3.4 / versionCode 53
+- 验证：连续三次 `unit.sh start web` 377/422/428ms；`boot-start.sh` 639ms 返回、端口随后 OPEN；
+  `conf_sync` 单测 22ms；门禁 0 FAIL / 1 warn
+
 ## v0.3.3
 
 - 新增根目录 `action.sh`：Magisk / KernelSU 里点模块的「操作」按钮即可
