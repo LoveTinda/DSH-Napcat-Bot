@@ -19,7 +19,7 @@ python3 - "$MODDIR" "$OUT" <<'PY' || { echo "FAIL 打包失败"; exit 1; }
 import os, sys, zipfile
 root, out = sys.argv[1], sys.argv[2]
 dirs = ['app', 'bin', 'units', 'contracts', 'etc', 'docs']
-files = ['module.prop', 'customize.sh', 'service.sh', 'uninstall.sh',
+files = ['module.prop', 'customize.sh', 'service.sh', 'action.sh', 'uninstall.sh',
          'README.md', 'RUNBOOK.md', 'AGENTS.md', 'CHANGELOG.md']
 skip_names = {'.runtime', '.git', 'originals', 'local', 'node_modules', '__pycache__', '.DS_Store'}
 skip_ext = ('.log', '.bak', '.tmp', '.pyc')

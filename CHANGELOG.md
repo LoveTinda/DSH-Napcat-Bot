@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v0.3.3
+
+- 新增根目录 `action.sh`：Magisk / KernelSU 里点模块的「操作」按钮即可
+  `unit.sh start web`，并直接打印 `https://<IP>:8443/?k=<token>` 和 web.log 末尾；
+  手机上不用开终端、不用记命令。实测在本机 8443 起网关，`/` 与 `/?k=` 均 200
+- 只起 `web`，不动 `bridge`/`napcat`；重复点等于「已在运行」，不会起第二个
+- 版本：v0.3.3 / versionCode 52
+
 ## v0.3.2
 
 - **开机自启 web（默认）**：新增 `bin/boot-start.sh`，`service.sh` 初始化后把它 fork 到后台

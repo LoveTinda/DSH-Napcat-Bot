@@ -96,7 +96,19 @@ KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子）
 `bin/boot-start.sh` 并**立即退出**。真正等 `sys.boot_completed`（最多 90 秒）和
 `unit.sh start` 都在 `boot-start.sh` 里，所以 service.sh 不会拖开机，也不会在开机阶段 mount。
 
-默认 `AUTO_START=web`：刷完重启，控制台自己就起来。桥接与 NapCat 仍手动：
+默认 `AUTO_START=web`：刷完重启，控制台自己就起来。
+
+不想等重启、或面板没起来时：Magisk → 模块 → **Tinda Bot → 操作**（KernelSU 里是同样的
+action 按钮）。`action.sh` 会起一次 `web`，然后把地址和 token 直接打出来：
+
+```
+控制台：https://192.168.1.3:8443/?k=<token>
+状态：web: running pid=...
+```
+
+它只起 `web`，不动 `bridge`/`napcat`；重复点也不会起第二个。
+
+桥接与 NapCat 仍手动：
 
 ```sh
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start bridge'   # QQ 桥接
