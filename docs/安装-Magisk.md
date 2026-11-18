@@ -1,6 +1,7 @@
-# 装成 Magisk 模块（默认手动启动）
+# 装成 Magisk 模块（默认只自启 web）
 
-> 目的：把模块装进 Magisk，默认**不自动启动**任何单元；需要时手动起，避免开机阶段挂载/进程拖垮系统。
+> 目的：把模块装进 Magisk；默认只自动启动 `web` 控制台，`bridge`/`napcat` 手动起，
+> 既让面板刷完就能打开，又避免白名单没配好时开机自动回 QQ 消息。
 > 边界：只讲安装与验证，不讲业务；运行时（node / DSH / NapCat / QQ）从哪来单独一节说清。
 > 依赖：Android root + Magisk（或兼容 Magisk 模块格式的 KernelSU/APatch）；
 >       打包脚本 `bin/make-module.sh`；结构门禁 `bin/check-module.sh`。
@@ -91,14 +92,21 @@ KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子）
 `bin/lib.sh` 会按模块路径判定 `$DATA=/data/adb/tinda-bot`，不会把状态写进模块目录
 （v0.2.19 修的就是这个：以前首次安装时会误落到 `$MODDIR/.runtime`，升级即丢）。
 
-开机流程：`service.sh` 只建目录、补配置、写 `module.log`，**立即退出**；
-不启动任何单元，不等 `sys.boot_completed`，不 chroot，不 mount。需要服务时手动起：
+开机流程：`service.sh` 建目录、补配置、写 `module.log`，然后 fork 一个后台的
+`bin/boot-start.sh` 并**立即退出**。真正等 `sys.boot_completed`（最多 90 秒）和
+`unit.sh start` 都在 `boot-start.sh` 里，所以 service.sh 不会拖开机，也不会在开机阶段 mount。
+
+默认 `AUTO_START=web`：刷完重启，控制台自己就起来。桥接与 NapCat 仍手动：
 
 ```sh
-su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start web'      # 控制台
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start bridge'   # QQ 桥接
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start napcat'   # 需要 QQ 时
+su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start web'      # 面板没起来时手动补
 ```
+
+想全自动（开机就接 QQ）：把 `$DATA/etc/tinda.conf` 里的 `AUTO_START` 改成
+`napcat bridge web`；想回到旧的「开机零动作」：改成 `AUTO_START=off`。
+改完重启生效，不用重刷模块。
 
 只有一个桥接：`bridge` 单元启动 `app/`（原版会话/工作区/模型/面板 + 当前安全层），
 不再有 `legacy` 并行单元。它是 `TYPE=proot`：用 DSH App 的 `libproot.so` 和
@@ -221,7 +229,8 @@ rootfs 里要装的东西（缺了单元会自己报错，不会静默）：
 
 ## 7. 安全
 
-- 默认不自动启动，开机阶段不 mount、不 chroot、不起进程；风险最低。
+- 默认只自启 `web`；开机阶段 `service.sh` 不 mount、不 chroot、不等开机，等待与启动都在后台脚本里。
+  不想要任何自启就设 `AUTO_START=off`（旧行为）。
 - 模块以 root 运行，业务进程没有降权（S-1 未通过）。
 - chroot 只在私有 namespace 里挂最小目录；不挂 `/data/adb` 祖先、不挂 `/sdcard`；失败关闭。
 - 只有 8443 对外且必须带 token；`BRIDGE_LISTEN` 不要改成 `0.0.0.0`，否则本机任意进程/局域网

@@ -1,0 +1,107 @@
+#!/system/bin/sh
+# 目的：把「能不能当 Magisk 模块刷」变成可执行检查——module.prop 字段、必备文件、shebang、
+#       可执行位、CRLF、service.sh 是否保持“开机零动作”，缺一项就失败。
+# 边界：只做静态检查，不刷机、不验证 Android 侧能不能跑 node（那是 S-4）；不检查业务逻辑。
+# 依赖：grep/sed/find/stat；模块根目录（含 module.prop）。--selftest 做一次反向用例。
+# 失败：任一项不满足 → 退出 1；--selftest 内部失败也算 1。
+# 副作用：--selftest 会在 /tmp 建临时目录，结束删除。
+
+MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
+CR=$(printf '\r')
+bad=0
+warn=0
+fail() { echo "FAIL  $*"; bad=$((bad + 1)); }
+note() { echo "warn  $*"; warn=$((warn + 1)); }
+ok()   { echo "ok    $*"; }
+
+check_root() {
+  root=$1
+  [ -f "$root/module.prop" ] || { fail "$root 缺 module.prop"; return; }
+  for f in customize.sh service.sh uninstall.sh bin/unit.sh bin/lib.sh etc/tinda.conf.example; do
+    [ -f "$root/$f" ] || fail "缺 $f"
+  done
+
+  # module.prop：Magisk 只认 key=value；缺字段或 id 非法会导致装不上或装上了看不见
+  for k in id name version versionCode author description; do
+    grep -qE "^$k=" "$root/module.prop" || fail "module.prop 缺 $k"
+  done
+  id=$(sed -n 's/^id=//p' "$root/module.prop" | head -1)
+  case "$id" in
+    ''|*[!a-z0-9._-]*) fail "module.prop 的 id 非法：'$id'（只允许小写字母/数字/._-）" ;;
+  esac
+  vc=$(sed -n 's/^versionCode=//p' "$root/module.prop" | head -1)
+  case "$vc" in ''|*[!0-9]*) fail "module.prop 的 versionCode 必须是整数：'$vc'" ;; esac
+
+  # 脚本：Android 上跑的小脚本必须用 /system/bin/sh；.mjs 用 node
+  for f in "$root/service.sh" "$root/customize.sh" "$root/uninstall.sh" $(find "$root/bin" -type f -name '*.sh' 2>/dev/null); do
+    [ -f "$f" ] || continue
+    head -1 "$f" | grep -q '^#!/system/bin/sh' || fail "$(basename "$f") 首行不是 #!/system/bin/sh"
+    [ -x "$f" ] || fail "$(basename "$f") 没有可执行位"
+    grep -q "$CR" "$f" && fail "$(basename "$f") 含 CRLF（Android sh 会报错）"
+  done
+  # .mjs 由 node 显式执行（exec "$NODE" file.mjs），不要求 shebang；只查 CRLF。
+  for f in $(find "$root/bin" "$root/units" -type f -name '*.mjs' 2>/dev/null); do
+    grep -q "$CR" "$f" && fail "$(basename "$f") 含 CRLF"
+  done
+
+  # 单元声明：TYPE 只允许这五种；写错会让 unit.sh 在开机时退出 78，而且日志在模块目录里看不到
+  for c in $(find "$root/units" -name 'unit.conf' 2>/dev/null); do
+    _t=$(sed -n 's/^TYPE=//p' "$c" | head -1)
+    case "$_t" in
+      exec|proot|chroot|external|auto) ;;
+      *) fail "$(basename "$(dirname "$c")")/unit.conf 的 TYPE='$_t' 非法（exec|proot|chroot|external|auto）" ;;
+    esac
+  done
+  grep -q 'module.log' "$root/service.sh" || note "service.sh 没写 module.log，刷完出问题不好查"
+
+  # 安全默认：service.sh 只初始化，不自动拉起；旧版的 180 秒等待/4 单元启动是事故源。
+  grep -q '自动启动：关闭' "$root/service.sh" || fail "service.sh 缺「自动启动：关闭」，不是安全默认"
+  grep -q 'sys.boot_completed' "$root/service.sh" && fail "service.sh 仍在等 sys.boot_completed（会拖开机）"
+  grep -q 'sleep 20' "$root/service.sh" && fail "service.sh 仍有 sleep 20（会拖开机）"
+  grep -q 'unit.sh' "$root/service.sh" || note "service.sh 没给手动启动示例"
+  # chroot 必须有 namespace 校验 + 传播 helper，且不得再 bind /data/adb 祖先。
+  grep -q 'unshare' "$root/bin/unit.sh" || fail "unit.sh 缺 unshare（chroot 会泄漏挂载）"
+  grep -q 'TINDA_NS' "$root/bin/unit.sh" || fail "unit.sh 缺 namespace 校验（可能没隔离就 mount）"
+  grep -q 'make-private.sh' "$root/bin/unit.sh" || fail "unit.sh 没调用 make-private.sh（传播可能回传宿主）"
+  [ -f "$root/bin/make-private.sh" ] || fail "缺 bin/make-private.sh"
+  grep -q 'rprivate' "$root/bin/make-private.sh" || fail "make-private.sh 没试 rprivate"
+  grep -q 'shared:' "$root/bin/make-private.sh" || fail "make-private.sh 没检查 shared 残留"
+  grep -q 'mount --make-private' "$root/bin/unit.sh" && fail "unit.sh 仍有 make-private 回退（递归私有不成立）"
+  grep -q 'mount -o bind /data/adb' "$root/bin/unit.sh" && fail "unit.sh 仍在 bind /data/adb（递归挂载）"
+  grep -q '^TYPE=exec' "$root/units/napcat/unit.conf" || fail "napcat 必须是 TYPE=exec（Android QQ 不能进 glibc rootfs）"
+  grep -q '^TYPE=proot' "$root/units/bridge/unit.conf" || fail "bridge 必须是 TYPE=proot（独立 node，不 chroot、不 mount）"
+  [ -f "$root/app/src/index.js" ] || fail "缺单应用入口 app/src/index.js"
+  grep -q 'MODPATH' "$root/customize.sh" || note "customize.sh 没用到 MODPATH（安装期路径可能取错）"
+
+  # 运行时（S-4）：模块本身不带 node；有 bin/node 就用，没有就要系统 PATH 里有
+  if [ -x "$root/bin/node" ]; then
+    ok "自带 bin/node（$("$root/bin/node" -v 2>/dev/null || echo 版本未知)）"
+  else
+    note "没有自带 bin/node：bridge 用 DSH rootfs 的 node；web/宿主单元仍要求 PATH 里有 node（见 S-4）"
+  fi
+  [ "$bad" -eq 0 ] && ok "模块结构可刷（$root）"
+}
+
+if [ "${1:-}" = "--selftest" ]; then
+  tmp=$(mktemp -d) || exit 1
+  trap 'rm -rf "$tmp"' EXIT INT TERM
+  mkdir -p "$tmp/bin" "$tmp/units/napcat" "$tmp/units/bridge" "$tmp/app/src" "$tmp/etc"
+  cp "$MODDIR/module.prop" "$MODDIR/service.sh" "$MODDIR/customize.sh" "$MODDIR/uninstall.sh" "$tmp/"
+  cp "$MODDIR/bin/unit.sh" "$MODDIR/bin/lib.sh" "$MODDIR/bin/make-private.sh" "$tmp/bin/"
+  cp "$MODDIR/units/napcat/unit.conf" "$tmp/units/napcat/"
+  cp "$MODDIR/units/bridge/unit.conf" "$tmp/units/bridge/"
+  cp "$MODDIR/app/src/index.js" "$tmp/app/src/"
+  cp "$MODDIR/etc/tinda.conf.example" "$tmp/etc/"
+  chmod +x "$tmp"/*.sh "$tmp"/bin/*.sh
+  _out=$(check_root "$tmp" 2>&1) || true
+  printf '%s\n' "$_out" | grep -q '^ok' || { echo "FAIL selftest：正常模块副本应通过"; echo "$_out"; exit 1; }
+  sed -i 's/^id=.*/id=Bad_ID!/' "$tmp/module.prop"
+  _out=$(check_root "$tmp" 2>&1) || true
+  printf '%s\n' "$_out" | grep -q 'id 非法' || { echo "FAIL selftest：坏 id 没被抓到"; echo "$_out"; exit 1; }
+  echo "ok    selftest：正常通过、坏 id 被拒"
+  exit 0
+fi
+
+check_root "$MODDIR"
+[ "$bad" -eq 0 ] && [ "$warn" -eq 0 ] && echo "结论：模块可以刷" || echo "结论：$bad 个 FAIL，$warn 个 warn"
+exit $([ "$bad" -eq 0 ] && echo 0 || echo 1)

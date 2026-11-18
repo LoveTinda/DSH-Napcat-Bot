@@ -53,6 +53,7 @@ Termux 的 proot Ubuntu 里，uid 0 是 proot 假 root，不是 Android 真 root
    - 从 headless 复制的 `qq` profile → `/root/.dsh/profiles/qq`
 4. 找不到 proot/rootfs/node → 退出 78，**不回退 exec**。
 5. `service.sh` 仍零动作；proot 只在手动 `unit.sh start bridge` 时启动。
+   （v0.3.2 起开机默认只自启 `web`，`bridge` 仍手动，见 [ADR-0011](0011-开机自启.md)。）
 
 ## 代价与残余风险
 

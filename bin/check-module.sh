@@ -54,11 +54,20 @@ check_root() {
   done
   grep -q 'module.log' "$root/service.sh" || note "service.sh 没写 module.log，刷完出问题不好查"
 
-  # 安全默认：service.sh 只初始化，不自动拉起；旧版的 180 秒等待/4 单元启动是事故源。
-  grep -q '自动启动：关闭' "$root/service.sh" || fail "service.sh 缺「自动启动：关闭」，不是安全默认"
-  grep -q 'sys.boot_completed' "$root/service.sh" && fail "service.sh 仍在等 sys.boot_completed（会拖开机）"
+  # 开机自启：等待与启动只能在后台的 boot-start.sh 里；service.sh 必须立刻退出。
+  # 旧版的 180 秒等待 + 20 秒 sleep 直接写在 service.sh 里，是拖住开机的事故源。
+  grep -q 'boot-start.sh' "$root/service.sh" || fail "service.sh 没调用 bin/boot-start.sh（AUTO_START 不生效）"
+  grep -q 'AUTO_START' "$root/service.sh" || fail "service.sh 没读 AUTO_START"
+  [ -f "$root/bin/boot-start.sh" ] || fail "缺 bin/boot-start.sh"
+  grep -q 'sys.boot_completed' "$root/bin/boot-start.sh" || fail "boot-start.sh 没等 boot_completed"
+  grep -q 'AUTO_START' "$root/bin/boot-start.sh" || fail "boot-start.sh 没读 AUTO_START"
   grep -q 'sleep 20' "$root/service.sh" && fail "service.sh 仍有 sleep 20（会拖开机）"
+  # 允许 wait 只在 boot-start.sh；service.sh 里出现 getprop 等待就是又回到老路。
+  if grep -q 'getprop sys.boot_completed' "$root/service.sh"; then
+    fail "service.sh 自己在等 boot_completed（等待必须放 boot-start.sh）"
+  fi
   grep -q 'unit.sh' "$root/service.sh" || note "service.sh 没给手动启动示例"
+  grep -q '^AUTO_START=' "$root/etc/tinda.conf.example" || fail "tinda.conf.example 缺 AUTO_START"
   # chroot 必须有 namespace 校验 + 传播 helper，且不得再 bind /data/adb 祖先。
   grep -q 'unshare' "$root/bin/unit.sh" || fail "unit.sh 缺 unshare（chroot 会泄漏挂载）"
   grep -q 'TINDA_NS' "$root/bin/unit.sh" || fail "unit.sh 缺 namespace 校验（可能没隔离就 mount）"

@@ -3,8 +3,10 @@
 QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，桥接器在中间搬运；
 所有改动进 git，每次更新落一份完整备份到 `/sdcard/backup/`。
 
-> Magisk 模块从 v0.2.36 起**默认不自动启动**：开机只建目录/写日志，不 mount、不 chroot、不起服务；
-> 需要时手动 `unit.sh start`。桥接是 `TYPE=proot`：复用 DSH App 的 `libproot.so` +
+> Magisk 模块从 v0.3.2 起**开机自动拉起 `web` 控制台**（`AUTO_START=web`）：`service.sh`
+> 只建目录/写日志就退出，等开机完成和启动进程都在后台的 `boot-start.sh` 里，不拖开机；
+> 桥接仍手动 `unit.sh start bridge`，白名单没配好时不会开机就自动回消息。
+> 桥接是 `TYPE=proot`：复用 DSH App 的 `libproot.so` +
 > `runtime/rootfs` 跑独立 node；proot 进程仍由 root 启动，`-0` 只是 guest 假 root，
 > 不是降权。找不到就 78，不回落宿主；
 > chroot 只留给 `web`，且只在私有 mount namespace 里挂最小目录，见 [ADR-0008](docs/adr/0008-启动与挂载安全.md)

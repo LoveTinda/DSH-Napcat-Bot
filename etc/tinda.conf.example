@@ -10,6 +10,13 @@ LOG_MAX_MB=50
 # 退避重启的等待上限（秒）。连续失败次数上限在 units/<name>/unit.conf 的 RESTART_MAX。
 RESTART_BACKOFF_MAX=60
 
+# ---- 开机自启 ----
+# 开机后自动拉起哪些单元，空格分隔（napcat / bridge / web）。默认只起 web 控制台：
+# 面板刷完就能打开，QQ 桥接仍要手动 start，避免白名单没配好时开机就自动回消息。
+# 想全自动：AUTO_START=napcat bridge web
+# 想回到「开机零动作」：AUTO_START=off
+AUTO_START=web
+
 # ---- 资源上限（T-4）----
 # node 单元的 V8 堆上限（MB）：桥接器 / 网关。超过就 GC/退出，不会把手机内存吃光。
 BRIDGE_HEAP_MB=256

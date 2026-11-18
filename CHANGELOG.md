@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## v0.3.2
+
+- **开机自启 web（默认）**：新增 `bin/boot-start.sh`，`service.sh` 初始化后把它 fork 到后台
+  就 `exit 0`；等 `sys.boot_completed`（最多 90 秒）和逐个 `unit.sh start` 都在后台脚本里，
+  开机阶段不再有长 sleep。刷完重启，`https://<IP>:8443/?k=<token>` 自己就能开
+- 新增配置 `AUTO_START`，默认 `web`：`napcat bridge web` = 全自动，`off` = 回到旧的
+  「开机零动作」。桥接默认仍手动起，避免白名单没配好时开机自动回 QQ 消息
+- `bin/check-module.sh` 固化契约：`service.sh` 必须调 `boot-start.sh`，且不许自己出现
+  `getprop sys.boot_completed` / `sleep 20`；`boot-start.sh` 必须等开机、读 `AUTO_START`
+- **app 测试从 0 恢复到可跑**：`app/test/p1.test.js` 恢复时留了「[MISSING LINE n]」占位和缺行，
+  整个文件语法错误、一条都跑不了。补回 /export 与 /health 用例，删掉无法恢复的尾段；现在 14 过 1 跳
+- 同步修掉测试暴露的丢失行为：
+  - `hardSplit` 回到「按 grapheme 切 + 代码围栏每段补回」，不再把 emoji 家族和代码块切碎
+  - `parseActions` 先遮住围栏内的内容，代码示例里的 `[[react:]]` 不会真的去点表情
+  - `validateSessionForResume` 支持 `apiMode`：API 传输能续 preset / 运行中的会话，并给出 warning
+  - `/help <命令>` 生成单条用法；`/sessions` 带编号和标题，`/ws 2` 可按编号切（编号 10 分钟有效）
+- 已知缺口：`app/test/offline/p0.test.js` 恢复时缺 89 行（`[MISSING LINE]` 占位），语法不成立、
+  一条都跑不了；所有备份里都是同一份残件，无法恢复，已删除（原件仍留在 `originals/` 与
+  `/sdcard/backup`）。它原本覆盖 turn 计数、投递失败、fork/恢复，这部分目前没有回归测试
+- 已知缺口：原版四页面板（44px 触控 / 复制 id / `/config` `/logs` `/status` 分页）还没并回
+  `app/src/panel.js`，对应用例标记为 skip，等 UI 合并后再打开
+- 文档：新增 [ADR-0011](docs/adr/0011-开机自启.md)；更新安装、配置说明、网关、安全模型、
+  README 里「默认不自动启动」的表述
+- 版本：v0.3.2 / versionCode 51
+- 验证：`AUTO_START=off` 不起单元；非法/不存在单元名被跳过并记 warn；`AUTO_START=web`
+  在测试端口 18443 起网关，`/ `、`/?k=`、`/_/status` 全 200；门禁与 app/test 见提交。
+  真机开机自启仍要在刷入后验证
+
 ## v0.3.1
 
 - **bridge 改为 proot 独立 node**：`units/bridge/unit.conf` 从 `TYPE=exec` 改为
