@@ -49,6 +49,7 @@ run() {
 
 NS_BAD=0
 run "make-rprivate" --make-rprivate /
+run "--make-private" --make-private /
 run "-o rprivate" -o rprivate /
 run "-o remount,rprivate" -o remount,rprivate /
 run "-o private" -o private /
