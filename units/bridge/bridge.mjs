@@ -148,6 +148,10 @@ const MAX_SEEN_IDS = 500;
 const OUTBOX_MAX = 100;
 const RETRY_BASE_MS = 800;
 const DISK_CHECK_MS = 5 * 60 * 1000;
+// 图片下载：正常 CDN 最多 1–2 跳，4 跳留余量又能防重定向环；0700/0600 是安全边界，不写裸数字。
+const MAX_IMAGE_REDIRECTS = 4;
+const IMAGE_DIR_MODE = 0o700;
+const IMAGE_FILE_MODE = 0o600;
 
 function log(...a) {
   const ts = new Date().toISOString();
@@ -967,7 +971,7 @@ async function collectImages(sources, chatKey) {
       timer = setTimeout(() => ctrl.abort(), cfg.imageTimeoutMs);
       let res = null;
       // 手动跟 3xx：每一跳都重新做 SSRF 校验，防止公网 URL 302 到 127.0.0.1。
-      for (let hop = 0; hop < 4; hop++) {
+      for (let hop = 0; hop < MAX_IMAGE_REDIRECTS; hop++) {
         res = await fetch(url, { signal: ctrl.signal, redirect: 'manual' });
         if (![301, 302, 303, 307, 308].includes(res.status)) break;
         const loc = res.headers.get('location');
@@ -1005,10 +1009,13 @@ async function collectImages(sources, chatKey) {
         if (total > cfg.imageMaxBytes) throw new Error('图片超过大小上限');
         chunks.push(buf);
       }
-      fs.mkdirSync(cfg.imageDir, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(cfg.imageDir, { recursive: true, mode: IMAGE_DIR_MODE });
+      // mkdir 的 mode 只在新建时生效；目录已存在时也压回 0700，保证文档里的权限不是空话。
+      try { fs.chmodSync(cfg.imageDir, IMAGE_DIR_MODE); }
+      catch (e) { log('warn: 图片目录权限设置失败', redactText((e && e.message) || String(e))); }
       const name = Date.now() + '-' + Math.random().toString(36).slice(2, 8) + ext;
       const file = path.join(cfg.imageDir, name);
-      fs.writeFileSync(file, Buffer.concat(chunks), { mode: 0o600 });
+      fs.writeFileSync(file, Buffer.concat(chunks), { mode: IMAGE_FILE_MODE });
       result.paths.push(file);
     } catch (e) {
       const reason = e && e.name === 'AbortError'

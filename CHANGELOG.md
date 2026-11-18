@@ -8,8 +8,8 @@
   私网、链路本地、多播（含 IPv4-mapped IPv6）；域名先 DNS 解析再逐个地址检查；手动跟 3xx，每一跳重新校验
   （防公网 URL 302 到 127.0.0.1）；content-type 白名单 png/jpeg/gif/webp；
   Content-Length 与流式读取双重大小上限；AbortController 超时
-- 默认 10MB / 8 张 / 8 秒；目录 0700、文件 0600；文件名时间戳+随机，扩展名只由
-  content-type 决定
+- 默认 10MB / 8 张 / 8 秒；目录 0700、文件 0600；目录已存在时也会 chmod 回 0700；
+  文件名时间戳+随机，扩展名只由 content-type 决定
 - 成功时任务末尾加「本轮附带 N 张图片，已保存到：…」；全部失败时正文前加
   「有 N 张图片没能读取…」，不让模型假装看过；部分失败在任务里注明
 - 配置：`BRIDGE_DOWNLOAD_IMAGES`、`BRIDGE_IMAGE_DIR`、`BRIDGE_IMAGE_MAX_BYTES`、

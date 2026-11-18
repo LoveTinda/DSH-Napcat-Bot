@@ -241,6 +241,8 @@ check('戳一戳进入提示词', Boolean(pokeReply) && String(pokeReply.body.me
   JSON.stringify(pokeReply && pokeReply.body));
 
 // 5.1b) 图片：下载到 imageDir，把本机路径交给模型
+// 故意先把目录放宽到 0755，验证桥接器不是只靠“新建时 mode”而是会 chmod 回 0700。
+fs.chmodSync(imageDir, 0o755);
 const imgMark = sent.length;
 await post({
   post_type: 'message', message_type: 'private', self_id: 10000, user_id: 20026,
