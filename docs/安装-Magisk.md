@@ -14,7 +14,8 @@
 | 业务运行时（DSH / NapCat / QQ） | 见第 5 节 | 模块装上但服务起不来 |
 
 **本仓库的 proot 环境不能代表真机**：这里是 App 内的 Ubuntu，不能拿它验证 Magisk
-的 mount/chroot 行为；刷入与开机验证必须在真机 root 环境做。
+的 mount/chroot 行为；刷入与开机验证必须在真机 root 环境做。不确定就先跑 1.5 节的
+最小挂载探针，默认不创建任何挂载。
 
 ## 1. 出包
 
@@ -30,6 +31,29 @@ sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.36-magi
 - `tinda-bot-v0.2.36-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
 - 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.36-magisk.zip.sha256`（在 zip 所在目录）
 - 同目录有 `.sha256`，刷之前核一下
+
+## 1.5 刷之前先跑最小挂载探针
+
+不确定这台的 `unshare`/`mount` 行不行，先跑 `bin/mount-probe.sh`。**默认不创建任何挂载**，
+只在一个临时目录里验证 `unshare -m` 与 `mount --make-rprivate`：
+
+```sh
+su -c 'sh /sdcard/Download/DSH-Go/tinda-mount-probe.sh'
+```
+
+- `PASS`：私有 namespace 可用；再跑 `--mount` 验证 bind/只读 remount：
+  `su -c 'sh /sdcard/Download/DSH-Go/tinda-mount-probe.sh --mount'`
+- `SKIP 没有 unshare`：这台不能走 chroot；`TYPE=exec` 照常能用，不影响开机。
+- `FAIL`：不要手动起 `chroot` 单元；把 `bridge`/`web` 的 `TYPE` 改为 `exec`
+  （宿主直装）最稳妥，不影响开机。
+
+脚本默认只写 `/data/local/tmp` 下的临时目录（不可写才退回 `/tmp`）；`--mount` 的挂载
+全在 `unshare -m` 子进程里，退出即销毁，并检查宿主 `mountinfo` 有没有残留。
+proot 里 namespace id 不变，会保守失败，结果不可信；必须在 `su -c` 的真机 root 下跑。若 `su` 读不到 `/sdcard`，先复制再跑：
+
+```sh
+su -c 'cp /sdcard/Download/DSH-Go/tinda-mount-probe.sh /data/local/tmp/ && sh /data/local/tmp/tinda-mount-probe.sh'
+```
 
 ## 2. 刷入
 

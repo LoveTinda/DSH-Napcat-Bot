@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 未发版
+
+- 新增 `bin/mount-probe.sh`：刷前最小挂载探针。默认只验证 `unshare -m` 与
+  `mount --make-rprivate`，**不创建挂载**；`--mount` 才在私有 namespace 里做一次
+  bind/remount/umount。退出时检查宿主 `mountinfo` 无残留；失败关闭，只卸载自己建的路径。
+- 用途：在真机 root 下回答「这台能不能走 chroot」，不再靠猜；不改变模块运行时行为。
+  proot 里 remount 会被拦截，结果不可信。v0.2.36 的 zip 未重打，先单独用下载目录里的脚本。
+
 ## v0.2.36
 - **启动/挂载安全重写（事故修复）**：v0.2.35 刷入后出现开机卡很久、系统服务/应用起不来。
   审计定位到 `service.sh` 最多等 `sys.boot_completed` 180 秒 + `sleep 20` 再拉起 4 个单元，

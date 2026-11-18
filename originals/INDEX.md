@@ -125,3 +125,8 @@
 - 目录：originals/20261118-173158-启动与挂载安全改造前
 - 清单：SHA256SUMS
 
+## 20261118-174103 — add-mount-probe
+- 文件数：110
+- 目录：originals/20261118-174103-add-mount-probe
+- 清单：SHA256SUMS
+
