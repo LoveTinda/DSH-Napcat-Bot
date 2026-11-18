@@ -77,7 +77,14 @@ export function validateConfig(cfg, { env = process.env } = {}) {
   if (!['forward-ws', 'reverse-ws', 'http'].includes(mode)) {
     fail('onebot.mode 只能是 forward-ws / reverse-ws / http（当前 ' + mode + '）', 'config/onebot-mode');
   }
-  if (mode !== 'reverse-ws') {
+  if (mode === 'http') {
+    // HTTP 模式：url 是 NapCat 的 OneBot HTTP 动作地址，listenPort 是本桥接接收事件的端口。
+    if (typeof onebot.url !== 'string' || !/^https?:\/\//.test(onebot.url)) {
+      fail('onebot.url 必须是 http:// 或 https:// 地址（当前 ' + String(onebot.url) + '）', 'config/onebot-url');
+    }
+    const p = Number(onebot.listenPort);
+    if (!Number.isInteger(p) || p < 1 || p > 65535) fail('onebot.listenPort 必须是 1-65535 的整数', 'config/onebot-port');
+  } else if (mode !== 'reverse-ws') {
     if (typeof onebot.url !== 'string' || !/^wss?:\/\//.test(onebot.url)) {
       fail('onebot.url 必须是 ws:// 或 wss:// 地址（当前 ' + String(onebot.url) + '）', 'config/onebot-url');
     }

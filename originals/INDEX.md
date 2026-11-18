@@ -155,3 +155,8 @@
 - 目录：originals/20261118-234952-legacy-config-prefill
 - 清单：SHA256SUMS
 
+## 20261118-235221 — legacy-http-mode
+- 文件数：145
+- 目录：originals/20261118-235221-legacy-http-mode
+- 清单：SHA256SUMS
+

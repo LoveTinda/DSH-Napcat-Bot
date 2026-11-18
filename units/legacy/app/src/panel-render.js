@@ -251,6 +251,9 @@ function renderOverview(s) {
   };
   row('后端', s.backend || '-');
   row('监听', s.listen || '-');
+  row('OneBot', s.onebot
+    ? (s.onebot.mode || '-') + ' · ' + (s.onebot.connected ? '在线' : '离线') + (s.onebot.url ? ' · ' + s.onebot.url : '')
+    : '-');
   row('NapCat API', s.napcatApi || '-');
   row('状态文件', s.config && s.config.BRIDGE_STATE_FILE ? s.config.BRIDGE_STATE_FILE : '(不落盘)');
   const al = s.alerts || {};

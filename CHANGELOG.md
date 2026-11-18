@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v0.2.42
+
+- **原版 legacy 支持 HTTP 模式**：`onebot.mode` 新增 `http`，在 `listenHost:listenPort`
+  接收 NapCat POST 事件，再用 `onebot.url` 调 `send_private_msg` / `send_group_msg`；
+  `listenPort` 默认 3002，避免和 NapCat 自己的 3001 抢端口
+- `config.js` 按模式校验 URL：HTTP 必须是 `http(s)://`，WS 必须是 `ws(s)://`；
+  HTTP 模式同样校验 `listenPort` 为 1-65535
+- 仪表盘概览新增「OneBot」行，显示模式、在线状态和地址
+- 新增 `test/legacy-onebot-http.mjs`：假动作服务 + 真桥接监听，验证 POST 事件
+  → 假 dsh → POST `send_private_msg`
+- 同步到 `units/legacy/app/`；v0.2.37 的开机零动作/挂载安全层未改
+- 版本：v0.2.42 / versionCode 47
+- 验证：legacy-smoke / legacy-http / legacy-turn / legacy-onebot /
+  legacy-onebot-http 全过；headers/independence/deps 通过，check-module 0 FAIL/1 warn
 ## v0.2.41
 
 - **legacy 首次启动自动生成可用配置**：新增 `bin/legacy-config.mjs`，从
