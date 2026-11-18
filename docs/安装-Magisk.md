@@ -98,11 +98,11 @@ KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子）
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start web'      # 控制台
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start bridge'   # QQ 桥接
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start napcat'   # 需要 QQ 时
-su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start legacy'   # 可选：原版完整桥接
 ```
 
-`legacy` 和 `bridge` **不要同时开**（会双回复）；它只跑宿主 node、不 chroot，
-第一次启动后要编辑 `$DATA/etc/legacy.json` 的白名单，详见 [原版桥接](原版桥接.md)。
+只有一个桥接：`bridge` 单元启动 `app/`（原版会话/工作区/模型/面板 + 当前安全层），
+不再有 `legacy` 并行单元。它只跑宿主 node、不 chroot；第一次启动后要编辑
+`$DATA/etc/app.json` 的白名单，详见 [单应用桥接](原版桥接.md)。
 
 桥接依赖 NapCat 的 3001；Web 依赖桥接面板口。没有硬依赖，起早了只是暂时 502。
 

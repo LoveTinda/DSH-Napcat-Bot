@@ -12,14 +12,14 @@ QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，�
 回复发不出去时先重试、再进补发队列，NapCat/网络恢复后自动送达（同一 `message_id` 不重复回答）；
 连续失败或磁盘将满会私聊告警给 `ALERT_QQ`。
 
-已经补回来的旧行为：回复策略（白名单 / 群必须 @ / owner-admin）、`/help` 命令表（23 条）、
-拟人化投递（分条 + 停顿）、群上下文注入、`/output` 四档、自动压缩、维护期自动回复、
-交互动作（`[[react]]` / `[[recall]]` / `[[poke]]`）、消息层（引用回复、`[表情]`/`[戳一戳]`、
-暂不支持类型提示、群回复 @、首次 AI 披露、群成员级会话、图片下载落盘）。
+已经补回来的旧行为：回复策略（白名单 / 群必须 @ / owner-admin）、`/help` 命令表、
+拟人化投递（分条 + 停顿）、群上下文注入、自动压缩、维护期自动回复、交互动作
+（`[[react]]` / `[[recall]]` / `[[poke]]`）、消息层（引用回复、`[表情]`/`[戳一戳]`、
+暂不支持类型提示、群回复 @、首次 AI 披露、群成员级会话、图片下载落盘），以及原版的
+会话归属、多工作区（`/ws`）、`/ls`、`/model`、`/export`、管理/仪表盘接口。
 
-**还没做什么**：图片上传、流式分段、插话打断、熔断/状态机、会话归属与多工作区、
-`/ws` `/ls` `/model` `/effort` `/persona` `/balance`、`/export` ZIP、面板写入口、
-Magisk 真机实测（当前跑在 App 的 Ubuntu 里）、`contracts/` 与实现的收口。
+**还没做什么**：图片上传、流式分段、插话打断、熔断/状态机、`/effort` `/persona` `/balance`、
+面板写入口、Magisk 真机实测（当前跑在 App 的 Ubuntu 里）、`contracts/` 与实现的收口。
 
 ## 先读这两篇
 
@@ -32,7 +32,8 @@ Magisk 真机实测（当前跑在 App 的 Ubuntu 里）、`contracts/` 与实�
 module.prop        模块声明（Magisk 形态用）
 service.sh         开机按单元拉起
 bin/               启动、看守、门禁、备份、安装、诊断（含 check-contracts.mjs）
-units/             单元：napcat / bridge / web / dsh / legacy，各自 unit.conf + 入口
+app/               唯一的桥接应用：原版会话/工作区/模型/面板 + 当前安全层
+units/             外围单元：napcat / bridge / web / dsh（bridge 只负责 launch app）
 contracts/         抽象接口契约（目标形态，当前未实现，检查器会如实告警）
 AGENTS.md          项目规范（人和 AI 的入口）
 RUNBOOK.md         运维手册：起停、排障、复查
@@ -78,11 +79,10 @@ MODDIR=$PWD sh bin/check-independence.sh
 MODDIR=$PWD sh bin/check-contracts.sh   # 当前会如实告警「契约未实现」，不是通过
 MODDIR=$PWD sh bin/check-deps.sh       # 只允许 node: 内置与相对路径（零第三方依赖）
 node units/web/test-gateway.mjs
-node units/bridge/test-panel.mjs
-node units/bridge/test-alert.mjs
+cd app && for t in test/*.mjs; do node "$t" || exit 1; done
 ```
 
-动手改代码前先跑 `bin/snapshot.sh "原因"`；它现在会把 `bin/`、`units/`、`contracts/` 也一起快照。
+动手改代码前先跑 `bin/snapshot.sh "原因"`；它会把 `bin/`、`app/`、`units/`、`contracts/` 一起快照。
 
 ## 远端
 

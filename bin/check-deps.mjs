@@ -3,7 +3,7 @@
  * 目的：把「零第三方依赖」变成可执行门禁 —— 本仓库源码只允许 import node: 内置模块或相对路径，
  *       任何人加了一个 npm 依赖（node_modules / package.json dependencies）都会在这里失败。
  * 边界：只做静态扫描（import/export from/require/动态 import 的字面量）；不解析动态拼接的模块名、
- *       不联网、不替代 npm audit；只扫 units/ 与 bin/ 下的 .mjs/.js。
+ *       不联网、不替代 npm audit；只扫 app/、units/ 与 bin/ 下的 .mjs/.js。
  * 依赖：node:fs、node:path；被 bin/check-deps.sh 与 pre-commit 钩子调用。
  * 失败：发现外部依赖 / node_modules / 非空的 dependencies 时，逐个打印 文件:行 并退出 1。
  * 副作用：只读，不写任何文件。
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(process.env.MODDIR || path.join(here, '..'));
-const SCAN_DIRS = ['units', 'bin'];
+const SCAN_DIRS = ['app', 'units', 'bin'];
 const EXTS = new Set(['.mjs', '.js']);
 
 // 只认「字面量」导入：from 'x'、import 'x'、import('x')、require('x')。
@@ -61,7 +61,7 @@ for (const d of SCAN_DIRS) {
   const nm = path.join(root, d, 'node_modules');
   if (fs.existsSync(nm)) violations.push(path.relative(root, nm) + '/ 存在第三方依赖目录');
 }
-for (const pkg of ['package.json', 'units/package.json', 'bin/package.json']) {
+for (const pkg of ['package.json', 'app/package.json', 'units/package.json', 'bin/package.json']) {
   const p = path.join(root, pkg);
   if (!fs.existsSync(p)) continue;
   try {

@@ -18,11 +18,13 @@ OUT="$OUTDIR/tinda-bot-$VER-magisk.zip"
 python3 - "$MODDIR" "$OUT" <<'PY' || { echo "FAIL 打包失败"; exit 1; }
 import os, sys, zipfile
 root, out = sys.argv[1], sys.argv[2]
-dirs = ['bin', 'units', 'contracts', 'etc', 'docs']
+dirs = ['app', 'bin', 'units', 'contracts', 'etc', 'docs']
 files = ['module.prop', 'customize.sh', 'service.sh', 'uninstall.sh',
          'README.md', 'RUNBOOK.md', 'AGENTS.md', 'CHANGELOG.md']
 skip_names = {'.runtime', '.git', 'originals', 'local', 'node_modules', '__pycache__', '.DS_Store'}
 skip_ext = ('.log', '.bak', '.tmp', '.pyc')
+# 测试不进 zip；单应用运行时只认 app/。units/bridge 只保留 unit.conf。
+skip_prefixes = ('app/test', 'app/state', 'app/workspace')
 
 with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
     n = 0
@@ -42,6 +44,8 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
                     continue
                 p = os.path.join(cur, name)
                 rel = os.path.relpath(p, root)
+                if any(rel == s or rel.startswith(s + '/') for s in skip_prefixes):
+                    continue
                 z.write(p, rel)
                 n += 1
     print('打包 %d 个文件' % n)

@@ -1,0 +1,103 @@
+{
+  "onebot": {
+    "mode": "forward-ws",
+    "url": "ws://127.0.0.1:3001",
+    "accessToken": "",
+    "listenHost": "127.0.0.1",
+    "listenPort": 6700,
+    "reconnectMs": 3000
+  },
+  "dsh": {
+    "command": "dsh",
+    "profile": "qq",
+    "cwd": "",
+    "timeoutMs": 900000,
+    "maxConcurrent": 1,
+    "extraArgs": [],
+    "registerWorkspace": true,
+    "webPort": 3080,
+    "tokenFile": ""
+  },
+  "admin": {
+    "host": "127.0.0.1",
+    "port": 6701
+  },
+  "panel": {
+    "host": "127.0.0.1",
+    "port": 6702,
+    "enabled": true,
+    "writeEnabled": false
+  },
+  "policy": {
+    "privateChat": "allowlist",
+    "groupChat": "mention",
+    "allowUsers": [],
+    "allowGroups": [],
+    "ownerUsers": [],
+    "adminUsers": [],
+    "allowAllUsers": false,
+    "allowAllGroups": false,
+    "ignoreSelf": true
+  },
+  "behavior": {
+    "ackAfterMs": 0,
+    "ackText": "收到，正在处理…",
+    "onBusy": "interrupt",
+    "busyText": "还在处理上一条，你的消息已排队。",
+    "maxReplyChars": 4000,
+    "sessionResumeRetryMs": [
+      1500,
+      4000
+    ],
+    "groupSenderPrefix": true,
+    "groupReplyAtSender": false,
+    "aiDisclosure": true,
+    "downloadImages": true,
+    "imageDir": "",
+    "imageDownloadTimeoutMs": 8000,
+    "imageMaxBytes": 10485760,
+    "imageAllowPrivateHosts": false,
+    "exportMaxBytes": 20971520,
+    "humanize": {
+      "enabled": true,
+      "charsPerMinute": 220,
+      "minDelayMs": 700,
+      "maxDelayMs": 5200,
+      "firstDelayMs": 1500,
+      "jitter": 0.35,
+      "burst": {
+        "enabled": true,
+        "listSplitMinWidth": 320,
+        "maxBursts": 6,
+        "gapMinMs": 450,
+        "gapMaxMs": 1800,
+        "hardLimit": 4000
+      },
+      "inputStatus": {
+        "enabled": true,
+        "onReceive": false,
+        "keepaliveMs": 8000,
+        "ackOnSlowMs": 0,
+        "eventStart": 0,
+        "eventStop": 1
+      }
+    },
+    "interactions": {
+      "react": true,
+      "recall": true,
+      "poke": true,
+      "read": false,
+      "autoLike": false,
+      "pokeBack": true
+    },
+    "groupContext": {
+      "enabled": true,
+      "maxMessages": 8,
+      "maxGroups": 50,
+      "maxChars": 1200,
+      "ttlMinutes": 120,
+      "maxMessageChars": 300
+    }
+  },
+  "stateFile": ""
+}

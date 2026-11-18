@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v0.3.0
+
+- **单应用合并（阶段一）**：桥接运行时改为根目录 `app/`，由 `bridge` 单元启动；
+  `units/legacy` 与旧的 `units/bridge/bridge.mjs` 不再作为运行入口。一个进程、一份
+  `$DATA/etc/app.json`、一份状态，不再有“两个桥接二选一”
+- 原版能力回到主路径：会话注册表/多工作区（`/ws`）、`/sessions`、`/model`、`/export`、
+  DSH API/headless 双传输、管理接口与仪表盘
+- 当前安全层并入：策略校验、outbox 补发、图片 SSRF、群上下文；新增 `/context` 查看/清空
+  群缓冲，群消息在策略判定前记录，被 @ 时注入最近几条
+- 收紧 `/ls`：只允许当前工作区内路径，绝对路径、`..`、符号链接逃逸都拒绝；
+  原版能列整个宿主文件系统，属于糟粕
+- 修复原版 `config.example.json` 在 80 行处被截断的问题（补全 `inputStatus`/
+  `interactions`/`stateFile`），并加入 `behavior.groupContext` 默认值；坏模板会让首次
+  启动直接失败
+- 启动脚本：`bin/run-app.sh` 负责生成/读取 `app.json` 并启动 `app/src/index.js`；
+  `bin/run-bridge.sh` 只做兼容转发。`TYPE=exec`，不 chroot、不 mount，v0.2.37 的
+  零开机动作/挂载安全层未改
+- 版本：v0.3.0 / versionCode 49
+- 验证：`app/test/` 6 个测试全过（commands / group-context / http / onebot / onebot-http /
+  smoke / turn）；headers/module 门禁通过。真实 NapCat/QQ 仍未联调
+- 未完成：当前主桥的 `/output` 四档、typing、磁盘告警尚未搬进 app；面板写 UI 仍是
+  原版缺口，阶段二继续
 ## v0.2.43
 
 - **legacy HTTP 模式真正可接线**：`napcat-wire-onebot.sh` 支持用环境变量

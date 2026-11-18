@@ -4,3 +4,7 @@ node_modules/
 local/*
 !local/README.md
 originals/*/app/**
+
+# 单应用运行态（测试/本地启动生成，不入库/不进 zip）
+app/state/
+app/workspace/
