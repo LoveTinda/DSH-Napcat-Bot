@@ -1,0 +1,14 @@
+{
+  "_说明": "复制到 $DATA/etc/bridge-policy.json 后按需改；不填就用手写的默认策略",
+  "privateChat": "allowlist",
+  "groupChat": "mention",
+  "allowUsers": [
+    "把允许私聊的QQ号填这里"
+  ],
+  "allowGroups": [],
+  "ownerUsers": [],
+  "adminUsers": [],
+  "allowAllUsers": false,
+  "allowAllGroups": false,
+  "ignoreSelf": true
+}

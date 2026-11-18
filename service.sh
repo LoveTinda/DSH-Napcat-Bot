@@ -1,10 +1,9 @@
 #!/system/bin/sh
-# 目的：开机后按单元逐个拉起（Magisk / KernelSU / SukiSU 都用这一份），并把过程写进 module.log。
-# 边界：只调用 bin/unit.sh，不认识具体业务；不依赖 customize.sh —— KernelSU 系列不保证会执行它，
-#       所以目录与配置在这里再初始化一次（幂等）。
-# 依赖：Android sh、getprop、bin/unit.sh、etc/tinda.conf.example。
-# 失败：某个单元起不来不影响其它单元；缺 node/rootfs 只记日志，由单元自己按失败关闭。
-# 副作用：建 $DATA 目录、补配置、写 $DATA/logs/module.log、拉起单元进程。
+# 目的：开机只做目录/配置初始化并立即退出；**不自动启动任何单元**，把开机风险降到最低。
+# 边界：不调用 unit.sh、不等 boot_completed、不 chroot、不 mount；服务由人手动启动。
+# 依赖：Android sh、etc/tinda.conf.example。
+# 失败：目录/配置写不进去只记日志，进程仍退出 0；不阻塞开机。
+# 副作用：建 $DATA 目录、补配置、写 $DATA/logs/module.log。
 
 MODDIR=${0%/*}
 [ -d "$MODDIR/bin" ] || MODDIR=/data/adb/modules/tinda-bot
@@ -24,44 +23,13 @@ log() {
   echo "$_ts $*"
 }
 
-# 等开机完成，但不要无限等：Magisk 的 late_start 有时很早，最多等 3 分钟。
-_i=0
-while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
-  _i=$((_i + 1))
-  [ "$_i" -ge 90 ] && { log "warn: 等不到 sys.boot_completed，继续启动"; break; }
-  sleep 2
-done
-# 给 NapCat/QQ 与网络留出时间；这个数在 RUNBOOK 里有说明，改它要同步文档。
-sleep 20
-
 log "service.sh 启动：MODDIR=$MODDIR"
 [ -d /data/adb ] && log "形态：Android root（/data/adb 存在）" || log "warn: 没有 /data/adb，不是模块形态"
 
-ROOTFS=/data/adb/tinda-bot/rootfs
-if [ -d "$ROOTFS/usr" ]; then
-  log "rootfs：$ROOTFS（单元会走 chroot）"
-else
-  log "rootfs：未初始化（单元走宿主直装；见 docs/安装-Magisk.md §5）"
-fi
-# 有 rootfs 就看 rootfs 里的 node（那才是单元真正会用到的），否则才看 Android 的 PATH。
-if [ -d "$ROOTFS/usr" ]; then
-  if chroot "$ROOTFS" /bin/sh -lc 'command -v node' >/dev/null 2>&1; then
-    log "node：$(chroot "$ROOTFS" /bin/sh -lc 'node -v' 2>/dev/null)（rootfs 内）"
-  else
-    log "warn: rootfs 里没有 node —— 单元会 exit 78（apt install nodejs）"
-  fi
-elif command -v node >/dev/null 2>&1; then
-  log "node：$(node -v 2>/dev/null)（PATH）"
-elif [ -x "$MODDIR/bin/node" ]; then
-  log "node：$MODDIR/bin/node"
-else
-  log "warn: 找不到 node —— 单元会 exit 78，直到装好运行时（S-4）"
-fi
-
-# 顺序：NapCat（OneBot 服务端）→ dsh（外部，只提示）→ bridge（找 3001）→ web（找 bridge 面板口）。
-for u in napcat dsh bridge web; do
-  _out=$(MODDIR="$MODDIR" sh "$MODDIR/bin/unit.sh" start "$u" 2>&1 | tail -2)
-  log "$u: $(printf '%s' "$_out" | tr '\n' ' ')"
-done
-log "service.sh 结束"
+# 安全默认：开机阶段不启动任何单元，也不等 boot_completed、不 chroot、不挂载。
+# 为什么：旧版在这里最多等 180 秒 + 20 秒，然后一次性拉起 4 个单元；在
+# service.sh 早于 boot_completed 执行的设备上会直接拖住开机。需要服务时手动起：
+#   su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start web'
+log "自动启动：关闭（安全默认）"
+log "手动启动示例：su -c 'sh $MODDIR/bin/unit.sh start web'"
 exit 0

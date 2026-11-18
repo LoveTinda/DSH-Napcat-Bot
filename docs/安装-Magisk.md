@@ -1,6 +1,6 @@
-# 装成 Magisk 模块（开机自启）
+# 装成 Magisk 模块（默认手动启动）
 
-> 目的：把「这台机器上手动起三个单元」变成「刷一次、开机自己起来」。
+> 目的：把模块装进 Magisk，默认**不自动启动**任何单元；需要时手动起，避免开机阶段挂载/进程拖垮系统。
 > 边界：只讲安装与验证，不讲业务；运行时（node / DSH / NapCat / QQ）从哪来单独一节说清。
 > 依赖：Android root + Magisk（或兼容 Magisk 模块格式的 KernelSU/APatch）；
 >       打包脚本 `bin/make-module.sh`；结构门禁 `bin/check-module.sh`。
@@ -13,34 +13,34 @@
 | 有可用的 node 运行时 | `magisk-provision.sh --check`，或 `su -c 'command -v node'` | 各单元 `exit 78`，`doctor.sh` 报「缺 node 运行时」（S-4） |
 | 业务运行时（DSH / NapCat / QQ） | 见第 5 节 | 模块装上但服务起不来 |
 
-**当前这台机器不满足第 1 条**：这里是 App 内的 proot Ubuntu（`/data/adb` 不存在、
-没有 `getprop`），所以本仓库的代码只能「按模块格式准备好」，刷入必须在真机 root 环境做。
+**本仓库的 proot 环境不能代表真机**：这里是 App 内的 Ubuntu，不能拿它验证 Magisk
+的 mount/chroot 行为；刷入与开机验证必须在真机 root 环境做。
 
 ## 1. 出包
 
 ```sh
 cd /root/workspace/tinda-bot
 sh bin/check-module.sh      # 结构门禁：module.prop / shebang / CRLF / service.sh
-sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.23-magisk.zip
+sh bin/make-module.sh       # → /sdcard/Download/DSH-Go/tinda-bot-v0.2.36-magisk.zip
 ```
 
 包内只含运行需要的东西（`module.prop`、四个脚本、`bin/ units/ contracts/ etc/ docs/` 与根文档），
 不含 `.runtime/`、`.git`、`originals/`、`local/`。当前产物：
 
-- `tinda-bot-v0.2.23-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
-- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.23-magisk.zip.sha256`（在 zip 所在目录）
+- `tinda-bot-v0.2.36-magisk.zip`（约 180 KB；文件清单用 `unzip -l` 看，脚本会打印实际文件数）
+- 同目录的 `.sha256` 就是校验和：刷之前 `sha256sum -c tinda-bot-v0.2.36-magisk.zip.sha256`（在 zip 所在目录）
 - 同目录有 `.sha256`，刷之前核一下
 
 ## 2. 刷入
 
-**刷完必须重启**（模块是在开机阶段挂载的）。按你的 root 方案选：
+**刷完重启一次**让模块目录生效；它不会在开机阶段挂载或启动服务。按你的 root 方案选：
 
 ```sh
 # Magisk
-su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.23-magisk.zip'
+su -c 'magisk --install-module /sdcard/Download/DSH-Go/tinda-bot-v0.2.36-magisk.zip'
 
 # KernelSU / SukiSU（同一个模块格式，目录也是 /data/adb/modules）
-su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.23-magisk.zip'
+su -c 'ksud module install /sdcard/Download/DSH-Go/tinda-bot-v0.2.36-magisk.zip'
 ```
 
 也可以直接在 Magisk / KernelSU / SukiSU 的 App 里：**模块** → **从本地安装** → 选 zip → 重启。
@@ -59,8 +59,16 @@ KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子）
 `bin/lib.sh` 会按模块路径判定 `$DATA=/data/adb/tinda-bot`，不会把状态写进模块目录
 （v0.2.19 修的就是这个：以前首次安装时会误落到 `$MODDIR/.runtime`，升级即丢）。
 
-开机流程：`service.sh` 等 `sys.boot_completed`，再等 20 秒，按 `napcat → dsh → bridge → web`
-依次 `unit.sh start`；单个人起不来不影响其它人。
+开机流程：`service.sh` 只建目录、补配置、写 `module.log`，**立即退出**；
+不启动任何单元，不等 `sys.boot_completed`，不 chroot，不 mount。需要服务时手动起：
+
+```sh
+su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start web'      # 控制台
+su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start bridge'   # QQ 桥接
+su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh start napcat'   # 需要 QQ 时
+```
+
+桥接依赖 NapCat 的 3001；Web 依赖桥接面板口。没有硬依赖，起早了只是暂时 502。
 
 ## 4. 验证与排障
 
@@ -76,9 +84,9 @@ su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'
 
 ## 5. 运行时从哪来（刷之前必须决定）
 
-模块只有 shell 和 JS，**不带 node**；NapCat/QQ 还是 glibc 的 Linux 程序。所以单元支持
-`TYPE=auto`：**有 `/data/adb` 且 `/data/adb/tinda-bot/rootfs/usr` 存在就走 chroot，
-否则走宿主直装**（proot 里就是这样）。代码已按这个约定写好，rootfs 由现场提供。
+模块只有 shell 和 JS，**不带 node**；NapCat/QQ 是 Android bionic 程序，**永远宿主直装**。
+桥接/网关支持 `TYPE=auto`：只有同时满足「有 `/data/adb`、有 rootfs、`unshare -m` 探针通过」
+才走 chroot；否则退回宿主直装（proot 里就是这样）。chroot 是显式能力，不是刷入即默认。
 
 ### 5.1 准备 rootfs
 
@@ -131,22 +139,30 @@ su -c "chroot /data/adb/tinda-bot/rootfs /bin/bash -lc 'npm i -g @deepseek-ai/ds
 ```sh
 su -c 'sh /data/adb/modules/tinda-bot/bin/unit.sh explain bridge'
 # 期望：bridge: TYPE=auto → chroot:/data/adb/tinda-bot/rootfs
+# 若显示 exec：unshare/rootfs 探针没过，退回宿主直装（安全优先，不硬上）
 su -c 'sh /data/adb/modules/tinda-bot/bin/magisk-provision.sh --check'
-su -c 'tail -20 /data/adb/tinda-bot/logs/module.log'   # 每行会写「启动方式 chroot」
+su -c 'tail -20 /data/adb/tinda-bot/logs/module.log'   # 每行会写「启动方式 chroot/exec」
 ```
 
-chroot 启动时 `unit.sh` 会把 `/data/adb`、`/sdcard`、`/proc`、`/dev`、`/sys` 挂进 rootfs，
-所以代码、配置、日志、状态仍然是 Android 侧那一份，不会出现「两套配置」。
+chroot 启动时 `unit.sh` 会在**私有 mount namespace** 里挂：`/proc`、`/dev`、`/sys`（只读）、
+模块代码（只读）、`etc/state/logs/run/secrets` 五个状态目录。**不再 bind `/data/adb`、不挂 `/sdcard`**；
+宿主路径用符号链接映射，namespace 退出即销毁，不会在宿主留下递归挂载。
+
+挂载前会先做 `unshare -m` + `mount --make-rprivate` 探针；探针不通过就退回 exec，不硬上。
+如果 `mountpoint -q /data/adb/tinda-bot/rootfs/data/adb` 还是真（旧版挂载没随重启清掉），
+直接拒绝启动并提示先重启，不再叠一层。
 
 rootfs 里要装的东西（缺了单元会自己报错，不会静默）：
 
 - Ubuntu 版 `node`（`apt install nodejs` 即可，桥接器/网关/DSH 都用它）
 - `openssl`（网关签证书；缺了退回 HTTP 并告警）
-- NapCat 与 QQ：现有 proot 里的 `/opt/napcat`、`/opt/QQ` 要迁进 rootfs，`xvfb-run` 也要装
+- NapCat 与 QQ **不进 chroot**：`napcat/unit.conf` 固定 `TYPE=exec`，继续用宿主 `/opt/QQ`、`/opt/napcat`；
+  不要再把 Android QQ 迁进 Ubuntu rootfs，它在 glibc 里跑不起来。
+- chroot 只给 bridge/web 用；它们需要 rootfs 内的 node/openssl，DSH 仍由 App 自己托管。
 - **不要**把 Android 的 node 放进 `/data/adb/modules/tinda-bot/bin/node` 后指望 chroot 用它：
   那是 bionic 二进制，在 Ubuntu rootfs 里跑不了。放 `bin/node` 只对宿主直装形态有意义。
 
-这套路径**没有在真机上跑过**（本机没有 `/data/adb`），属于清单 S-4 的残余；但失败是显式的：
+这套路径**没有在真机上跑过**（本仓库的 proot 不能代表 Magisk 环境），属于清单 S-4 的残余；但失败是显式的：
 缺 rootfs → `unit.sh explain` 显示 exec、`module.log` 写明；缺 node → 单元 `exit 78`，
 `doctor.sh` 报「缺 node 运行时」，不会假装成功。
 
@@ -159,7 +175,9 @@ rootfs 里要装的东西（缺了单元会自己报错，不会静默）：
 
 ## 7. 安全
 
+- 默认不自动启动，开机阶段不 mount、不 chroot、不起进程；风险最低。
 - 模块以 root 运行，业务进程没有降权（S-1 未通过）。
+- chroot 只在私有 namespace 里挂最小目录；不挂 `/data/adb` 祖先、不挂 `/sdcard`；失败关闭。
 - 只有 8443 对外且必须带 token；`BRIDGE_LISTEN` 不要改成 `0.0.0.0`，否则本机任意进程/局域网
   都能直连面板与 OneBot 入口。
 - `secrets/` 与 `state/` 是 0600/0700；日志写盘前过 `redact()`。

@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## v0.2.36
+- **启动/挂载安全重写（事故修复）**：v0.2.35 刷入后出现开机卡很久、系统服务/应用起不来。
+  审计定位到 `service.sh` 最多等 `sys.boot_completed` 180 秒 + `sleep 20` 再拉起 4 个单元，
+  以及 `unit.sh` 把 `/data/adb` bind 进 `/data/adb/tinda-bot/rootfs/data/adb` 的递归挂载；
+  挂载没有 namespace/unmount，会留到重启。v0.2.35 模块包作废
+- `service.sh` 改为**开机零动作**：只建目录/补配置/写日志，立即退出；不启动单元、
+  不等 boot_completed、不 chroot、不 mount。服务改为手动 `unit.sh start`
+- `unit.sh` 的 chroot 改为**私有 mount namespace**：`unshare -m` + `mount --make-rprivate`；
+  探针不过就退回 exec，显式 chroot 失败关闭；namespace 退出即销毁挂载
+- 不再 bind `/data/adb`、不再挂 `/sdcard`；只挂 `/proc`、`/dev`（nosuid,noexec）、
+  `/sys`（ro,nosuid,nodev,noexec）、模块代码（ro）和 `etc/state/logs/run/secrets`；
+  宿主路径用符号链接映射
+- `napcat/unit.conf` 固定 `TYPE=exec`：Android QQ 是 bionic 二进制，不再被塞进 glibc rootfs
+- 旧版递归挂载残留检测：`mountpoint -q <rootfs>/data/adb` 为真时拒绝启动并提示先重启
+- 新增 [ADR-0008](docs/adr/0008-启动与挂载安全.md)，更新安装/生命周期/安全模型文档
+- 版本：v0.2.36 / versionCode 41；模块 description 改为「默认手动启动」
+- 验证：所有 shell 脚本 `sh -n`；`unit.sh explain` 在 proot 里 napcat/bridge/web 均为 exec；
+  全套 22 个 JS 测试文件通过；门禁通过。**真实 Android 的 unshare/mount 仍未验证**，
+  所以默认不动系统，失败关闭
+
 ## v0.2.35
 - **P0-3 图片落盘**：新增 `units/bridge/image.mjs`——收到 `image` 段先下载到
   `$DATA/state/bridge/images`，再把本机路径交给模型用文件工具查看，不再只有

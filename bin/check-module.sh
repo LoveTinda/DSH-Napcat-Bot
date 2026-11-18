@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 目的：把「能不能当 Magisk 模块刷」变成可执行检查——module.prop 字段、必备文件、shebang、
-#       可执行位、CRLF、service.sh 是否真的拉起单元，缺一项就失败。
+#       可执行位、CRLF、service.sh 是否保持“开机零动作”，缺一项就失败。
 # 边界：只做静态检查，不刷机、不验证 Android 侧能不能跑 node（那是 S-4）；不检查业务逻辑。
 # 依赖：grep/sed/find/stat；模块根目录（含 module.prop）。--selftest 做一次反向用例。
 # 失败：任一项不满足 → 退出 1；--selftest 内部失败也算 1。
@@ -54,11 +54,16 @@ check_root() {
   done
   grep -q 'module.log' "$root/service.sh" || note "service.sh 没写 module.log，刷完出问题不好查"
 
-  # service.sh 必须真的去拉单元，否则「开机自启」只是口号
-  grep -q 'unit.sh' "$root/service.sh" || fail "service.sh 没有调用 bin/unit.sh"
-  for u in napcat bridge web; do
-    grep -q "$u" "$root/service.sh" || note "service.sh 没提到单元 $u"
-  done
+  # 安全默认：service.sh 只初始化，不自动拉起；旧版的 180 秒等待/4 单元启动是事故源。
+  grep -q '自动启动：关闭' "$root/service.sh" || fail "service.sh 缺「自动启动：关闭」，不是安全默认"
+  grep -q 'sys.boot_completed' "$root/service.sh" && fail "service.sh 仍在等 sys.boot_completed（会拖开机）"
+  grep -q 'sleep 20' "$root/service.sh" && fail "service.sh 仍有 sleep 20（会拖开机）"
+  grep -q 'unit.sh' "$root/service.sh" || note "service.sh 没给手动启动示例"
+  # chroot 必须有私有 namespace，且不得再 bind /data/adb 祖先。
+  grep -q 'unshare' "$root/bin/unit.sh" || fail "unit.sh 缺 unshare（chroot 会泄漏挂载）"
+  grep -q 'make-rprivate' "$root/bin/unit.sh" || fail "unit.sh 缺 make-rprivate（挂载会往宿主传播）"
+  grep -q 'mount -o bind /data/adb' "$root/bin/unit.sh" && fail "unit.sh 仍在 bind /data/adb（递归挂载）"
+  grep -q '^TYPE=exec' "$root/units/napcat/unit.conf" || fail "napcat 必须是 TYPE=exec（Android QQ 不能进 glibc rootfs）"
   grep -q 'MODPATH' "$root/customize.sh" || note "customize.sh 没用到 MODPATH（安装期路径可能取错）"
 
   # 运行时（S-4）：模块本身不带 node；有 bin/node 就用，没有就要系统 PATH 里有
@@ -73,9 +78,10 @@ check_root() {
 if [ "${1:-}" = "--selftest" ]; then
   tmp=$(mktemp -d) || exit 1
   trap 'rm -rf "$tmp"' EXIT INT TERM
-  mkdir -p "$tmp/bin" "$tmp/units" "$tmp/etc"
+  mkdir -p "$tmp/bin" "$tmp/units/napcat" "$tmp/etc"
   cp "$MODDIR/module.prop" "$MODDIR/service.sh" "$MODDIR/customize.sh" "$MODDIR/uninstall.sh" "$tmp/"
   cp "$MODDIR/bin/unit.sh" "$MODDIR/bin/lib.sh" "$tmp/bin/"
+  cp "$MODDIR/units/napcat/unit.conf" "$tmp/units/napcat/"
   cp "$MODDIR/etc/tinda.conf.example" "$tmp/etc/"
   chmod +x "$tmp"/*.sh "$tmp"/bin/*.sh
   _out=$(check_root "$tmp" 2>&1) || true

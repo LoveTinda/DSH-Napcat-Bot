@@ -75,17 +75,30 @@ find_unit_pids() {
 }
 
 # 目的：算出这个单元实际该怎么起——exec（宿主直装）还是 chroot（Magisk 下的 Linux rootfs）。
-# 输入：无（读 $TYPE 与 /data/adb 是否存在）；输出：echo "exec" 或 "chroot:<rootfs>"。
-# 失败：chroot 但 rootfs 不存在 → 输出 chroot:<路径>，由 spawn 报 78。
+# 输入：无（读 $TYPE、/data/adb、rootfs、unshare 是否存在）；输出："exec" 或 "chroot:<rootfs>"。
+# 失败：显式 chroot 但 rootfs 不存在 → 仍输出 chroot:<路径>，由 spawn 报 78（失败关闭）。
 # 副作用：无。
+# 目的：判断当前 Android 环境有没有 unshare；没有就不进 chroot，避免挂载泄漏。
+has_unshare() { command -v unshare >/dev/null 2>&1; }
+
+# 目的：在真正挂载前做一次最小探针：unshare 可用、能建私有传播。
+# 失败：返回非 0，调用方退回 exec；不创建任何业务挂载。
+chroot_usable() {
+  has_unshare || return 1
+  command -v chroot >/dev/null 2>&1 || return 1
+  _sh=/system/bin/sh
+  [ -x "$_sh" ] || _sh=sh
+  "$(command -v unshare)" -m "$_sh" -c 'mount --make-rprivate / 2>/dev/null' >/dev/null 2>&1
+}
+
 resolve_mode() {
   _rf=${TINDA_ROOTFS:-/data/adb/tinda-bot/rootfs}
   case "$TYPE" in
     exec|external) echo "$TYPE" ;;
     chroot) echo "chroot:$_rf" ;;
     auto)
-      # 判据是「Android root 环境 + 有 rootfs」：proot 里 /data/adb 不存在，自然退回 exec。
-      if [ -d /data/adb ] && [ -d "$_rf/usr" ]; then echo "chroot:$_rf"; else echo "exec"; fi ;;
+      # 判据是「Android root + 有 rootfs + unshare 能建私有传播」；proot 里 /data/adb 不存在，自然退回 exec。
+      if [ -d /data/adb ] && [ -d "$_rf/usr" ] && chroot_usable; then echo "chroot:$_rf"; else echo "exec"; fi ;;
   esac
 }
 
@@ -93,23 +106,91 @@ spawn_exec() { sh -c "$CMD"; }
 
 # 目的：在 Magisk 的 root 环境里把模块代码与状态挂进 Linux rootfs，再 chroot 执行单元命令。
 # 输入：$1 = rootfs 路径；用 $CMD 作为 rootfs 内的命令。
-# 失败：rootfs 缺 /usr 或缺代码目录 → 78；mount 失败只 warn（可能已挂过/内核不支持，让后续命令自己报错）。
-# 副作用：在 rootfs 里建挂载点并 bind mount proc/dev/sys/sdcard/data；退出时由内核随进程结束保留。
+# 失败：rootfs 缺 /usr、缺 unshare/chroot、mount 失败 → 78（失败关闭，不在宿主留下挂载）。
+# 副作用：在**私有 mount namespace** 里 bind proc/dev/sys/模块代码/状态目录；namespace 退出即销毁。
+#       不 bind /data/adb，不挂 /sdcard；不再出现 /data/adb → 自己子目录的递归挂载。
 spawn_chroot() {
   _rf=$1
   [ -d "$_rf/usr" ] || { log error "$NAME: rootfs 未初始化：$_rf（跑 bin/magisk-provision.sh）"; return 78; }
   command -v chroot >/dev/null 2>&1 || { log error "$NAME: 没有 chroot 命令（Android 太老或缺 busybox）"; return 78; }
-  mkdir -p "$_rf/proc" "$_rf/dev" "$_rf/sys" "$_rf/sdcard" "$_rf/data/adb" 2>/dev/null
-  mountpoint -q "$_rf/proc" || mount -t proc proc "$_rf/proc" 2>/dev/null || log warn "$NAME: 挂 proc 失败"
-  mount -o bind /dev "$_rf/dev" 2>/dev/null || log warn "$NAME: 挂 /dev 失败"
-  mount -o bind /sys "$_rf/sys" 2>/dev/null || log warn "$NAME: 挂 /sys 失败"
-  [ -d /sdcard ] && { mount -o bind /sdcard "$_rf/sdcard" 2>/dev/null || log warn "$NAME: 挂 /sdcard 失败"; }
-  mount -o bind /data/adb "$_rf/data/adb" 2>/dev/null || log warn "$NAME: 挂 /data/adb 失败"
-  # 模块代码与状态都在 /data/adb 下，已经随上面的 bind 进 rootfs；这里只确认路径真的可达。
-  [ -d "$_rf/data/adb" ] || { log error "$NAME: rootfs 里看不到 /data/adb"; return 78; }
-  [ -f "$_rf$MODDIR/bin/unit.sh" ] || { log error "$NAME: 代码没进 rootfs：$MODDIR"; return 78; }
-  # 脚本首行是 #!/system/bin/sh（Android 路径），rootfs 里没有它；显式用 /bin/sh 跑。
-  chroot "$_rf" /bin/sh -lc "cd '$MODDIR' && exec /bin/sh '$CMD'"
+  has_unshare || { log error "$NAME: 没有 unshare，拒绝 chroot（否则挂载会泄漏到宿主）"; return 78; }
+  # 旧版把 /data/adb bind 进 rootfs 的 /data/adb；如果这次还没重启，目标仍是挂载点，拒绝再叠。
+  if mountpoint -q "$_rf/data/adb" 2>/dev/null; then
+    log error "$NAME: 检测到旧版 /data/adb 挂载，请重启后再启动（拒绝递归挂载）"
+    return 78
+  fi
+  [ -f "$MODDIR/bin/unit.sh" ] || { log error "$NAME: 宿主代码目录缺失：$MODDIR"; return 78; }
+  _unshare=$(command -v unshare)
+  _sh=/system/bin/sh
+  [ -x "$_sh" ] || _sh=sh
+  MODDIR="$MODDIR" DATA="$DATA" TINDA_RF="$_rf" TINDA_MODDIR="$MODDIR" TINDA_DATA="$DATA" TINDA_CMD="$CMD" TINDA_NAME="$NAME" \
+    "$_unshare" -m "$_sh" -c '
+      set -eu
+      rf=$TINDA_RF
+      mod=$TINDA_MODDIR
+      data=$TINDA_DATA
+      cmd=$TINDA_CMD
+      name=$TINDA_NAME
+
+      # 私有挂载传播：子进程退出时 namespace 销毁，挂载不会留在宿主。
+      if ! mount --make-rprivate / 2>/dev/null; then
+        if ! mount --make-private / 2>/dev/null; then
+          echo "[$name] 无法建立私有挂载传播，拒绝 chroot" >&2
+          exit 78
+        fi
+      fi
+
+      # 只清私有 namespace 里从父进程继承的同名挂载；不影响宿主。
+      for m in "$rf/proc" "$rf/dev" "$rf/sys" "$rf/opt/tinda-bot" "$rf/var/tinda"; do
+        if mountpoint -q "$m" 2>/dev/null; then umount "$m" 2>/dev/null || true; fi
+      done
+
+      mkdir -p "$rf/proc" "$rf/dev" "$rf/sys" "$rf/opt/tinda-bot" "$rf/var/tinda" \
+        "$rf/data/adb/modules" "$rf/data/adb/modules_update" 2>/dev/null
+
+      bind_mount() {
+        src=$1; dst=$2; opts=$3
+        mount -o bind "$src" "$dst" || return 1
+        if [ -n "$opts" ]; then
+          # 不同 toybox/内核接受两种 remount 语法；都失败就失败关闭。
+          mount -o remount,"$opts" "$dst" 2>/dev/null || \
+            mount -o remount,bind,"$opts" "$dst" 2>/dev/null || return 1
+        fi
+        return 0
+      }
+
+      mount -t proc -o nosuid,nodev,noexec proc "$rf/proc" || {
+        echo "[$name] 挂 /proc 失败" >&2; exit 78; }
+      bind_mount /dev "$rf/dev" "nosuid,noexec" || {
+        echo "[$name] 挂 /dev 失败" >&2; exit 78; }
+      bind_mount /sys "$rf/sys" "ro,nosuid,nodev,noexec" || {
+        echo "[$name] 挂 /sys（只读）失败" >&2; exit 78; }
+      # 不挂 /sdcard：桥接/web 不需要；少一个可写外部面。
+      bind_mount "$mod" "$rf/opt/tinda-bot" "ro,nosuid,nodev,noexec" || {
+        echo "[$name] 挂模块代码失败" >&2; exit 78; }
+
+      # 状态只挂目录，不挂 /data/adb 祖先；这样不会出现 /data/adb → 自己子目录的递归。
+      for d in etc state logs run secrets; do
+        mkdir -p "$data/$d" "$rf/var/tinda/$d" 2>/dev/null
+        bind_mount "$data/$d" "$rf/var/tinda/$d" "nosuid,nodev,noexec" || {
+          echo "[$name] 挂状态目录 $d 失败" >&2; exit 78; }
+      done
+
+      # 让 CMD/MODDIR/DATA 这些宿主路径在 chroot 里也能解析：用符号链接，不再 bind /data/adb。
+      for p in "$rf/data/adb/modules/tinda-bot" "$rf/data/adb/modules_update/tinda-bot"; do
+        if [ -e "$p" ] && [ ! -L "$p" ]; then
+          echo "[$name] $p 已存在且不是符号链接，拒绝覆盖" >&2; exit 78
+        fi
+        ln -sfn /opt/tinda-bot "$p" || { echo "[$name] 建模块符号链接失败" >&2; exit 78; }
+      done
+      if [ -e "$rf/data/adb/tinda-bot" ] && [ ! -L "$rf/data/adb/tinda-bot" ]; then
+        echo "[$name] $rf/data/adb/tinda-bot 已存在且不是符号链接，拒绝覆盖" >&2; exit 78
+      fi
+      ln -sfn /var/tinda "$rf/data/adb/tinda-bot" || {
+        echo "[$name] 建状态符号链接失败" >&2; exit 78; }
+
+      exec chroot "$rf" /bin/sh -lc "cd '$mod' && exec /bin/sh '$cmd'"
+    '
 }
 
 spawn() {
