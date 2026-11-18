@@ -77,7 +77,7 @@ check_root() {
   if [ -x "$root/bin/node" ]; then
     ok "自带 bin/node（$("$root/bin/node" -v 2>/dev/null || echo 版本未知)）"
   else
-    note "没有自带 bin/node：刷完后要求 PATH 里已有 node，否则各单元会 exit 78（见 S-4）"
+    note "没有自带 bin/node：bridge 用 DSH rootfs 的 node；web/宿主单元仍要求 PATH 里有 node（见 S-4）"
   fi
   [ "$bad" -eq 0 ] && ok "模块结构可刷（$root）"
 }
