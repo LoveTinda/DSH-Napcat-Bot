@@ -231,26 +231,41 @@ export function findSessionRef(entries, raw) {
     '当前工作区可见 ' + entries.length + ' 条会话；用 /sessions 查看可续会话。' };
 }
 
-/** /ws 的可续性判定：不满足就拒绝并说明。 */
-export function validateSessionForResume(entry, { workspace, activeSessionId = null } = {}) {
-  if (!entry) return { ok: false, reason: '找不到这条会话。' };
-  if (entry.running) return { ok: false, reason: '这条会话正在运行（DSH 正在写它），不能同时切进去。等它结束再试。' };
-  if (activeSessionId && String(entry.id).toLowerCase() === String(activeSessionId).toLowerCase()) {
-    return { ok: false, reason: '这条会话就是当前会话，已经在用了。' };
+  /**
+   * 目的：判断 /ws 能不能绑这条会话；不满足就给出人能读的原因。
+   * 输入：entry 会话目录项；workspace 目标工作区；activeSessionId 当前绑定；
+   *       apiMode=true 表示走 DSH API（能续 preset、能在运行中挂上去）。
+   * 输出：{ ok, reason } 或 { ok: true, warnings }。
+   * 失败：不抛错，一律用 ok:false + reason 表达。
+   * 副作用：无。
+   */
+  export function validateSessionForResume(entry, { workspace, activeSessionId = null, apiMode = false } = {}) {
+    if (!entry) return { ok: false, reason: '找不到这条会话。' };
+    const warnings = [];
+    if (entry.running && !apiMode) {
+      return { ok: false, reason: '这条会话正在运行（DSH 正在写它），不能同时切进去。等它结束再试。' };
+    }
+    if (entry.running && apiMode) warnings.push('这条会话正在运行；API 模式会挂到同一条上，可能和它当前这一轮抢上下文。');
+    if (activeSessionId && String(entry.id).toLowerCase() === String(activeSessionId).toLowerCase()) {
+      return { ok: false, reason: '这条会话就是当前会话，已经在用了。' };
+    }
+    if (entry.headerError) return { ok: false, reason: '会话元数据不可读（' + entry.headerError + '），为安全起见不切换。' };
+    if (!entry.dir && !apiMode) {
+      return { ok: false, reason: 'DSH 能列出这条会话，但本机找不到它的日志文件，无法确认可续。' };
+    }
+    if (entry.preset && !apiMode) {
+      return { ok: false, reason: '这条会话带 DSH preset=' + entry.preset + '；headless 一次性运行器会拒绝带 preset 的会话，切过去下一轮就会分叉。' };
+    }
+    if (entry.preset && apiMode) warnings.push('这条会话带 preset=' + entry.preset + '；API 模式可续，headless 会分叉。');
+    if (entry.origin === 'subagent' || entry.parentSession) {
+      return { ok: false, reason: '这是 subagent/fork 会话，不能作为普通聊天会话续聊。' };
+    }
+    if (entry.cwd && canon(entry.cwd) !== canon(workspace)) {
+      if (!apiMode) return { ok: false, reason: '会话 cwd=' + entry.cwd + ' 与当前工作区 ' + canon(workspace) + ' 不一致。' };
+      warnings.push('会话 cwd=' + entry.cwd + ' 与当前工作区 ' + canon(workspace) + ' 不一致；API 模式仍按会话自己的 cwd 跑。');
+    }
+    return { ok: true, warnings };
   }
-  if (entry.headerError) return { ok: false, reason: '会话元数据不可读（' + entry.headerError + '），为安全起见不切换。' };
-  if (!entry.dir) return { ok: false, reason: 'DSH 能列出这条会话，但本机找不到它的日志文件，无法确认可续。' };
-  if (entry.preset) {
-    return { ok: false, reason: '这条会话带 DSH preset=' + entry.preset + '；headless 一次性运行器会拒绝带 preset 的会话，切过去下一轮就会分叉。' };
-  }
-  if (entry.origin === 'subagent' || entry.parentSession) {
-    return { ok: false, reason: '这是 subagent/fork 会话，不能作为普通聊天会话续聊。' };
-  }
-  if (entry.cwd && canon(entry.cwd) !== canon(workspace)) {
-    return { ok: false, reason: '会话 cwd=' + entry.cwd + ' 与当前工作区 ' + canon(workspace) + ' 不一致。' };
-  }
-  return { ok: true, warnings: [] };
-}
 
 /** 未知轮数用 null 表示，不要伪造成 0。 */
 export function turnsLabel(turns) {

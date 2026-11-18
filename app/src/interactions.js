@@ -11,11 +11,18 @@
 const ACTION_RE = /\[\[(react|recall|poke|face)(?::([^\]]*))?\]\]/gi;
 
 export function parseActions(text, { maxActions = 2 } = {}) {
+  const src = String(text ?? '');
+  // 代码块里的 [[react:...]] 是示例代码的一部分，不能真的去点表情；先整体遮住再还原。
+  const blocks = [];
+  const masked = src.replace(/```[^\n]*\n[\s\S]*?\n```/g, (block) => {
+    blocks.push(block);
+    return '\u0000' + (blocks.length - 1) + '\u0000';
+  });
   const found = [];
-  const body = String(text ?? '').replace(ACTION_RE, (m, kind, value) => {
+  const body = masked.replace(ACTION_RE, (m, kind, value) => {
     found.push({ kind: String(kind).toLowerCase(), value: String(value || '').trim() });
     return '';
-  });
+  }).replace(/\u0000(\d+)\u0000/g, (m, i) => blocks[Number(i)] ?? '');
   return {
     text: body.replace(/\n{3,}/g, '\n\n').trim(),
     actions: found.slice(0, Math.max(0, Number(maxActions) || 0)),

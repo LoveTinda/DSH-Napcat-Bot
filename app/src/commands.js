@@ -48,7 +48,7 @@ export const BRIDGE_COMMANDS = [
   { name: 'sessions', aliases: ['history', '会话', '历史', '列表'],
                                                                   desc: '列出当前工作区会话',        hint: '' },
   { name: 'ws',     aliases: ['workspace', '工作区', 'use', 'switch', '切换'],
-                                                                  desc: '查看或切换上下文',          hint: '[路径|会话 id]' },
+                                                                  desc: '查看或切换上下文',          hint: '[编号|会话 id|路径]' },
   { name: 'ls',     aliases: ['列目录'],                           desc: '列工作区里的文件',          hint: '[子路径]' },
   { name: 'context',aliases: ['上下文', '最近消息'],                 desc: '群上下文缓冲里有什么',      hint: '[clear]' },
   { name: 'model',  aliases: ['模型'],                            desc: '查看或切换模型',            hint: '[别名]' },
@@ -61,6 +61,9 @@ const RETIRED = new Map([
   ['压缩',    '改名为 DSH 的原生命令：/compact'],
   ['停止',    '改名为 /stop']
 ]);
+
+// /sessions 的编号缓存有效期：手机上看列表到切过去通常几秒，10 分钟足够，过后要求重列。
+const SESSION_INDEX_TTL_MS = 10 * 60 * 1000;
 
 const BRIDGE_BY_ALIAS = new Map();
 for (const c of BRIDGE_COMMANDS) {
@@ -105,6 +108,29 @@ export function parseCommand(text) {
  * 帮助文本。`dshCommands` 由调用方从 DSH 现场取（commands/list），
  * 取不到时退回 DSH_COMMANDS 兜底表。
  */
+/**
+ * 目的：给单条指令生成「用法 + 别名 + 示例」，/help <指令> 用它，避免用户只看总表猜参数。
+ * 输入：规范名（如 ws）与 DSH 指令表。
+ * 输出：多行文本；指令不存在返回 null（调用方回落到总帮助）。
+ * 失败：无。
+ * 副作用：无。
+ */
+function usageText(name, dshCommands) {
+  const own = BRIDGE_COMMANDS.find((c) => c.name === name);
+  if (own) {
+    const lines = ['用法：/' + own.name + (own.hint ? ' ' + own.hint : ''), own.desc];
+    if (own.aliases.length) lines.push('别名：' + own.aliases.map((a) => '/' + a).join(' '));
+    if (own.name === 'ws') {
+      lines.push('示例：/ws 3  切到 /sessions 列表里的第 3 条');
+      lines.push('      /ws /data/ws  切到某个工作区；不带参数 = 看当前绑定');
+    }
+    return lines.join('\n');
+  }
+  const dsh = (dshCommands && dshCommands.length ? dshCommands : DSH_COMMANDS).find((c) => c.name === name);
+  if (dsh) return '用法：/' + dsh.name + (dsh.hint ? ' ' + dsh.hint : '') + '\n' + (dsh.desc || '');
+  return null;
+}
+
 export function helpText(dshCommands) {
   const dsh = (dshCommands && dshCommands.length ? dshCommands : DSH_COMMANDS);
   const lines = [];
@@ -232,6 +258,19 @@ async function switchContext(ctx, args) {
     return;
   }
 
+  // /ws 2：按 /sessions 输出的编号切，省得在手机上复制 30 多位 id。
+  // 编号只对同一次列表且同一工作区有效，过期就要求重列，绝不猜。
+  if (/^\d+$/.test(args)) {
+    const idx = ctx.bridge.sessionIndex && ctx.bridge.sessionIndex.get(ctx.chatKey);
+    const fresh = idx && idx.workspace === c.workspace && (Date.now() - idx.at) < SESSION_INDEX_TTL_MS;
+    const id = fresh ? idx.ids[Number(args) - 1] : null;
+    if (!id) {
+      await ctx.reply('编号 ' + args + ' 已失效：先 /sessions 重新列一次（编号 10 分钟内有效）。');
+      return;
+    }
+    args = id;
+  }
+
   // 像会话 id 就按会话处理；找不到再退回"当路径"（避免把名叫 a965f282 的目录判死）
   if (looksLikeSessionRef(args)) {
     const entries = await ctx.bridge.sessionCatalog(c.workspace);
@@ -254,7 +293,7 @@ async function switchContext(ctx, args) {
       // 查不到就是“未知”（null），不伪造 0。
       const bound = ctx.bridge.bindChatContext(ctx.chatKey, { workspace: c.workspace, sessionId: e.id });
       log.info('切换会话 ' + bound.sessionId + ' @ ' + maskChatKey(ctx.chatKey));
-      await ctx.reply('已切到会话 ' + shortId(bound.sessionId) + '\n' + bound.sessionId +
+      await ctx.reply('已切到会话 ' + shortId(bound.sessionId) + (e.title ? ' 《' + e.title + '》' : '') + '\n' + bound.sessionId +
         '\n（headless 会话不进 DSH 侧边栏；下一条消息就发进这条会话，轮数：' + turnsLabel(bound.turns) + '）');
       return;
     }
@@ -315,7 +354,15 @@ async function switchWorkspace(ctx, target) {
 }
 
 const BRIDGE_HANDLERS = {
-  async help(ctx) {
+  async help(ctx, arg) {
+    const want = String(arg || '').trim().toLowerCase().replace(/^\//, '');
+    if (want) {
+      const name = BRIDGE_BY_ALIAS.get(want) || want;
+      const one = usageText(name, ctx.dshCommands);
+      if (one) { await ctx.reply(one); return; }
+      await ctx.reply('没有这个指令：/' + want + '\n发 /help 看全部。');
+      return;
+    }
     await ctx.reply(helpText(ctx.dshCommands));
   },
 
@@ -390,10 +437,12 @@ const BRIDGE_HANDLERS = {
       '会话（* = 当前；共 ' + entries.length + ' 条，最多列 15 条）：'];
     let shown = 0;
     let resumable = 0;
+    const ids = [];
     for (const e of entries) {
       if (e.resumable) resumable += 1;
       if (shown >= 15) continue;
       shown += 1;
+      ids.push(e.id);
       const same = current && String(current).toLowerCase() === String(e.id).toLowerCase();
       const known = c.sessionTurns && Object.prototype.hasOwnProperty.call(c.sessionTurns, e.id)
         ? c.sessionTurns[e.id]
@@ -401,12 +450,16 @@ const BRIDGE_HANDLERS = {
       const state = e.running ? '运行中（现在不能切）'
         : e.resumable ? '可续'
           : ('不可续：' + (e.reason || '原因未知'));
-      lines.push((same ? '* ' : '  ') + shortId(e.id) + '  ' + timeLabel(e.updatedAt) +
-        '  ' + state + '  轮数=' + turnsLabel(known));
+      lines.push((same ? '* ' : '  ') + '#' + shown + ' ' + shortId(e.id) + '  ' + timeLabel(e.updatedAt) +
+        '  ' + state + '  轮数=' + turnsLabel(known) + (e.title ? '  《' + e.title + '》' : ''));
       lines.push('    ' + e.id);
     }
     if (entries.length > shown) lines.push('…还有 ' + (entries.length - shown) + ' 条未显示。');
-    lines.push('', '可续 ' + resumable + ' / ' + entries.length + '；用 /ws <完整 id 或唯一前缀> 切换，/new 新开。');
+    lines.push('', '可续 ' + resumable + ' / ' + entries.length +
+      '；用 /ws <编号|完整 id 或唯一前缀> 切换（编号 10 分钟内有效），/new 新开。');
+    if (ctx.bridge.sessionIndex) {
+      ctx.bridge.sessionIndex.set(ctx.chatKey, { workspace: c.workspace, ids, at: Date.now() });
+    }
     await ctx.reply(lines.join('\n'));
   },
 
