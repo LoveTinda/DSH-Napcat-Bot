@@ -7,6 +7,8 @@
   都不可用才 78。新增 `WEB_RUNTIME=auto|proot|host`，默认 `auto`（proot 优先）
 - 启动日志会写明实际运行时：`web 运行时：DSH proot（…/rootfs）` 或 `探测不到 DSH proot，
   退回宿主 node`
+- 探测结果缓存到 `$DATA/run/proot.path`：`pm path` 是 binder 调用，开机时每个单元都探一遍太贵；
+  缓存的二进制/rootfs 还在就直接用，不在（App 升级/卸载）就重新探测
 - 版本：v0.3.9 / versionCode 58
 - 验证：本机（无 proot）走 `auto` 时打印「退回宿主 node」并正常起网关；`PATH` 去掉 node
   且无 proot 时 78 并给出可读原因

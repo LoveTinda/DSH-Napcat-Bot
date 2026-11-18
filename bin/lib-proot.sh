@@ -9,6 +9,17 @@ proot_detect() {
   PROOT_PKG=$(conf_get PROOT_PKG "io.github.ccch1mneyyy.dsh_app")
   PROOT_BIN=$(conf_get PROOT_BIN "")
   PROOT_ROOTFS=$(conf_get PROOT_ROOTFS "")
+  # 探测要调 pm（binder，几百毫秒）再 find，开机时每单元都做一遍太贵；
+  # 探测成功一次就记到 $DATA/run/proot.path，下次先验文件还在就直接用。
+  _cache="${DATA}/run/proot.path"
+  if [ -z "$PROOT_BIN" ] && [ -f "$_cache" ]; then
+    _cb=$(cut -d'|' -f1 "$_cache" 2>/dev/null)
+    _cr=$(cut -d'|' -f2 "$_cache" 2>/dev/null)
+    if [ -n "$_cb" ] && [ -x "$_cb" ] && [ -x "$_cr/usr/local/bin/node" ]; then
+      PROOT_BIN=$_cb; PROOT_ROOTFS=$_cr
+      return 0
+    fi
+  fi
   if [ -z "$PROOT_BIN" ]; then
     _pm=/system/bin/pm
     [ -x "$_pm" ] || _pm=$(command -v pm 2>/dev/null)
@@ -30,5 +41,7 @@ proot_detect() {
     done
   fi
   [ -n "$PROOT_ROOTFS" ] && [ -x "$PROOT_ROOTFS/usr/local/bin/node" ] || return 1
+  printf '%s|%s\n' "$PROOT_BIN" "$PROOT_ROOTFS" > "$_cache" 2>/dev/null
+  chmod 600 "$_cache" 2>/dev/null
   return 0
 }
