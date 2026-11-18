@@ -24,7 +24,7 @@ files = ['module.prop', 'customize.sh', 'service.sh', 'uninstall.sh',
 skip_names = {'.runtime', '.git', 'originals', 'local', 'node_modules', '__pycache__', '.DS_Store'}
 skip_ext = ('.log', '.bak', '.tmp', '.pyc')
 # 测试不进 zip；单应用运行时只认 app/。units/bridge 只保留 unit.conf。
-skip_prefixes = ('app/test', 'app/state', 'app/workspace')
+skip_prefixes = ('app/test', 'app/state', 'app/workspace', 'app/config.smoke')
 
 with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
     n = 0
@@ -45,6 +45,8 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
                 p = os.path.join(cur, name)
                 rel = os.path.relpath(p, root)
                 if any(rel == s or rel.startswith(s + '/') for s in skip_prefixes):
+                    continue
+                if rel.startswith('app/config.smoke'):
                     continue
                 z.write(p, rel)
                 n += 1
