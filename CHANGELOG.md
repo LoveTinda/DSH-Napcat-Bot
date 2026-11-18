@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.2.43
+
+- **legacy HTTP 模式真正可接线**：`napcat-wire-onebot.sh` 支持用环境变量
+  `BRIDGE_LISTEN` 覆盖事件推送地址，`BRIDGE_LISTEN=127.0.0.1:3002` 即可把
+  NapCat 的 HTTP 事件推到 legacy 的 HTTP 监听端口；默认配置不变
+- 文档补上完整两条命令，并强调 HTTP 模式只在单独运行 legacy 时使用
+- v0.2.37 的开机零动作/挂载安全层未改
+- 版本：v0.2.43 / versionCode 48
+- 验证：临时 NapCat 配置跑接线脚本，`httpClients[0].url` 为
+  `http://127.0.0.1:3002/`；legacy 5 个测试、headers/independence/deps 通过，
+  check-module 0 FAIL/1 warn
 ## v0.2.42
 
 - **原版 legacy 支持 HTTP 模式**：`onebot.mode` 新增 `http`，在 `listenHost:listenPort`

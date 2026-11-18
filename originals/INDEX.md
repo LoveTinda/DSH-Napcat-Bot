@@ -160,3 +160,8 @@
 - 目录：originals/20261118-235221-legacy-http-mode
 - 清单：SHA256SUMS
 
+## 20261118-235616 — legacy-http-wiring
+- 文件数：145
+- 目录：originals/20261118-235616-legacy-http-wiring
+- 清单：SHA256SUMS
+
