@@ -150,3 +150,8 @@
 - 目录：originals/20261118-234815-legacy-panel-render
 - 清单：SHA256SUMS
 
+## 20261118-234952 — legacy-config-prefill
+- 文件数：144
+- 目录：originals/20261118-234952-legacy-config-prefill
+- 清单：SHA256SUMS
+

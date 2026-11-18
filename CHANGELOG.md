@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.2.41
+
+- **legacy 首次启动自动生成可用配置**：新增 `bin/legacy-config.mjs`，从
+  `$DATA/etc/bridge-policy.json` 复制真实白名单，从 `NAPCAT_API` 生成
+  `ws://127.0.0.1:3001`；没有策略文件才保留模板占位 `"0"`
+- `run-legacy.sh` 不再简单 `cp` 模板；生成失败直接 78，不带着坏配置启动
+- 文档更新首次启动说明；v0.2.37 的开机零动作/挂载安全层未改
+- 版本：v0.2.41 / versionCode 46
+- 验证：用临时 DATA + bridge-policy 生成 legacy.json，白名单/URL 正确；
+  legacy-smoke/http/turn/onebot 全过；check-module 0 FAIL/1 warn
+
 ## v0.2.40
 
 - **legacy 仪表盘升级**：不再用 7 行简化页，改用当前只读仪表盘的完整渲染
