@@ -8,7 +8,7 @@ if [ -z "$MODDIR" ]; then
 fi
 bad=0
 # 单应用后 app/src 是主代码，必须遵守；测试和浏览器静态页只做语法检查。
-for f in $(find "$MODDIR/bin" "$MODDIR/units" "$MODDIR/app/src" "$MODDIR/app/tools" -type f \( -name '*.sh' -o -name '*.mjs' -o -name '*.js' \) 2>/dev/null); do
+for f in $(find "$MODDIR/bin" "$MODDIR/units" "$MODDIR/app/src" -type f \( -name '*.sh' -o -name '*.mjs' -o -name '*.js' \) 2>/dev/null); do
   for k in 目的 边界 依赖 失败; do
     grep -q "$k：" "$f" || { echo "FAIL 缺 $k：$(basename "$f")"; bad=$((bad+1)); }
   done

@@ -14,6 +14,9 @@
 - 修复原版 `config.example.json` 在 80 行处被截断的问题（补全 `inputStatus`/
   `interactions`/`stateFile`），并加入 `behavior.groupContext` 默认值；坏模板会让首次
   启动直接失败
+- 删除未接线的 `app/src/panel-client.js`、`qq-gateway.sh`、`qq-guard.sh`、
+  `tools/doctor.js`：它们仍带恢复缺行，模块已由 `unit.sh`/`doctor.sh` 承担，
+  不再把坏文件带进 zip
 - 启动脚本：`bin/run-app.sh` 负责生成/读取 `app.json` 并启动 `app/src/index.js`；
   `bin/run-bridge.sh` 只做兼容转发。`TYPE=exec`，不 chroot、不 mount，v0.2.37 的
   零开机动作/挂载安全层未改
