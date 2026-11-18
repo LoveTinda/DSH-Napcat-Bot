@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## v0.3.8
+
+- **web 不再要求宿主有 node**：真机 root 下 `PATH` 里通常没有 node，之前 `run-web.sh`
+  直接 `exit 78`，所以开机日志里一直是「缺 node」，8443 永远起不来。现在检测不到 node 就
+  借 DSH App 的 proot + runtime rootfs 再跑一遍自己（只 bind 模块目录与 `$DATA`，rootfs 里
+  有 node 和 openssl），失败才 78
+- 新增 `bin/lib-proot.sh`：把 `PROOT_PKG/PROOT_BIN/PROOT_ROOTFS` 的探测抽出来复用；
+  探测不到就返回 1，由调用方给出可读错误
+- `check-module` 增加两条硬性检查：proot 探测库存在、`run-web.sh` 已接回退
+- 版本：v0.3.8 / versionCode 57
+- 验证：把 `PATH` 里的 node 拿掉跑 `run-web.sh`，332ms 内以 78 退出并打印
+  「缺 node：宿主 PATH 没有，DSH App 的 proot 也不可用」；真机 proot 分支待验证
+
 ## v0.3.7
 
 - **模块页直接「打开」**：新增 `webroot/index.html`，KernelSU / APatch 的模块卡片会多出

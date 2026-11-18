@@ -11,7 +11,23 @@ fi
 ensure_dirs
 
 NODE="$MODDIR/bin/node"; [ -x "$NODE" ] || NODE=$(command -v node)
-[ -n "$NODE" ] || { log error "缺 node"; exit 78; }
+
+# 宿主没有 node（真机 root 下很常见）就借 DSH App 的 proot 运行时。
+# 只把模块目录与 $DATA 原路径 bind 进去，rootfs 里有 node 和 openssl，脚本不用改。
+if [ -z "$NODE" ] && [ "${TINDA_IN_PROOT:-0}" != "1" ]; then
+  . "$MODDIR/bin/lib-proot.sh"
+  if proot_detect; then
+    log warn "宿主没有 node，改用 DSH App 的 proot 运行时：$PROOT_ROOTFS"
+    exec "$PROOT_BIN" --kill-on-exit -0 --rootfs="$PROOT_ROOTFS" --cwd=/root \
+      -b /dev -b /proc -b /sys -b /system -b /apex \
+      -b "$MODDIR:$MODDIR" -b "$DATA:$DATA" \
+      /usr/bin/env TINDA_IN_PROOT=1 PATH=/usr/local/bin:/usr/bin:/bin \
+      /bin/sh "$MODDIR/bin/run-web.sh"
+  fi
+  log error "缺 node：宿主 PATH 没有，DSH App 的 proot 也不可用（见 PROOT_* 配置）"
+  exit 78
+fi
+[ -n "$NODE" ] || { log error "缺 node（proot 内也没找到）"; exit 78; }
 
 TOKEN_FILE="$DATA/secrets/web.token"
 # 空文件也算没有：网关会拒绝空 token 启动，所以这里必须把空文件补成真 token。

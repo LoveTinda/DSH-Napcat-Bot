@@ -1,6 +1,6 @@
 id=tinda-bot
 name=Tinda Bot
-version=v0.3.7
-versionCode=56
+version=v0.3.8
+versionCode=57
 author=tinda
-description=QQ <-> DSH 桥接器模块：模块页「打开」（KernelSU/APatch）或「操作」（Magisk）直达状态页，看版本/单元/证书/token/日志并启停 web；刷完即起 web；开机自启；单元启动 ~0.4 秒；bridge 走 DSH App proot 独立 node。
+description=QQ <-> DSH 桥接器模块：模块页「打开」直达状态页；web 没有宿主 node 时自动借用 DSH App 的 proot 运行时；刷完即起 web；开机自启；unit 启动 ~0.4 秒；bridge 走 proot 独立 node。
