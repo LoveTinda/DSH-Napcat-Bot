@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { renderPanel } from './panel-render.js';
 import {
   bearerToken, hasJsonContentType, hostAllowed, localHosts, originAllowed, originsFor, safeEqual
 } from './auth.js';
@@ -59,7 +60,11 @@ export function startPanel(options = {}, handlers = {}) {
         const status = handlers.getStatus ? await handlers.getStatus() : {};
         const events = handlers.getEvents ? await handlers.getEvents() : (status.events || []);
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-        return res.end(page(status, events));
+        return res.end(renderPanel({ ...status, events }));
+      }
+      if (req.method === 'GET' && url.pathname === '/state.json') {
+        const status = handlers.getStatus ? await handlers.getStatus() : {};
+        return json(res, 200, { ...status, events: handlers.getEvents ? await handlers.getEvents() : (status.events || []) });
       }
       if (req.method === 'GET' && url.pathname === '/api/status') {
         return json(res, 200, { ok: true, status: handlers.getStatus ? await handlers.getStatus() : {} });

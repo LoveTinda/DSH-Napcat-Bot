@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v0.2.40
+
+- **legacy 仪表盘升级**：不再用 7 行简化页，改用当前只读仪表盘的完整渲染
+  （概览/会话/事件/配置四页 + 自动刷新）；`/state.json` 供页面轮询
+- `panel.js` 的 `/` 返回 `renderPanel(snapshot)`；保留 `/api/status`、`/api/sessions`、
+  `/api/logs` 和 token 保护的写接口
+- `legacy-http` 改为断言「桥接器面板」并继续验证 admin/panel/command
+- 同步到 `units/legacy/app/`；v0.2.37 的开机零动作/挂载安全层未改
+- 版本：v0.2.40 / versionCode 45
+- 验证：legacy-smoke / legacy-http / legacy-turn / legacy-onebot 全过；
+  `check-module` 0 FAIL/1 warn；unit start/stop 后 admin 6701 / panel 6702 均 200
+
 ## v0.2.39
 
 - **原版 legacy 的 OneBot WS 入站跑通**：假 OneBot WS 发私聊 → 假 dsh → 真实
