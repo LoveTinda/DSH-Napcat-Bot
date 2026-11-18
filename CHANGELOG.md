@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.3.5
+
+- **刷完即用，不用先重启**：`customize.sh` 在安装结束前从暂存目录（`$MODPATH`）直接
+  `unit.sh start web`（`setsid` 脱离安装进程），并把带 token 的地址打进 Magisk 安装日志。
+  模块目录本身仍要重启才生效，但面板不必等——`web` 只依赖 `$DATA` 与模块代码
+- 只起 `web`；`bridge`/`napcat` 不在这里起（依赖 QQ/NapCat 登录，留给手动或开机）
+- 旧配置没有 `AUTO_START` 时，安装脚本同样按默认 `web` 处理；显式 `off` 才不启动
+- 版本：v0.3.5 / versionCode 54
+- 验证：模拟 Magisk 环境跑 `customize.sh`，安装日志直接打印
+  `https://192.168.1.3:8443/?k=...`；安装脚本退出后进程仍在、8443 可连
+
 ## v0.3.4
 
 - **启动提速（实测 `unit.sh start web` 2.4s → 0.4s，`boot-start.sh` 0.6s 返回）**：

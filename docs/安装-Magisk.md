@@ -66,7 +66,11 @@ su -c 'cp /sdcard/Download/DSH-Go/tinda-mount-probe.sh /sdcard/Download/DSH-Go/t
 
 ## 2. 刷入
 
-**刷完重启一次**让模块目录生效；它不会在开机阶段挂载或启动服务。按你的 root 方案选：
+**刷完就能开面板，不用先重启**：安装结束时 `customize.sh` 会直接从暂存目录起一次
+`web`，并把 `https://<IP>:8443/?k=<token>` 打进 Magisk 的安装日志。模块目录本身仍要
+重启才生效；重启后由 `service.sh`/`boot-start.sh` 接管，不会起第二个。
+
+想让所有单元都换成本次刷入的版本（例如改了 `bridge`），仍然建议重启一次。按你的 root 方案选：
 
 ```sh
 # Magisk
