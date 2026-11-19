@@ -15,11 +15,106 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { URL } from 'node:url';
 
+// 控制台输出双写一份到共享存储：网关的启动/崩溃信息原本只进 $DATA/logs/web.log，
+// 那目录只有 root 能读，于是外面看到的永远是「启动网关…」之后再无一行。
+// 放在最前面：连「拒绝启动」「token 文件读不到」这类原因也必须留在外面看得到的地方。
+const MIRROR_LOG = process.env.TINDA_MIRROR_LOG || '';
+if (MIRROR_LOG) {
+  let mirrorWarned = false;
+  const tee = (fn) => (...args) => {
+    fn(...args);
+    try {
+      fs.appendFileSync(MIRROR_LOG, new Date().toISOString() + ' ' + args.map(String).join(' ') + '\n');
+    } catch (e) {
+      if (!mirrorWarned) {
+        mirrorWarned = true;
+        fn('[web] 控制台镜像写不进去：' + (e.code || e.message));
+      }
+    }
+  };
+  console.log = tee(console.log.bind(console));
+  console.error = tee(console.error.bind(console));
+}
+
 const BIND = process.env.WEB_BIND || '127.0.0.1';
 const PORT = Number(process.env.WEB_PORT || 8088);
-const TOKEN = String(process.env.WEB_TOKEN || '').trim();
 const ALLOW_NO_TOKEN = process.env.WEB_ALLOW_NO_TOKEN === '1';
 const COOKIE = 'tinda';
+// token 的唯一真源是**文件**，不是启动时的环境变量。
+// 为什么：环境变量在进程启动那一刻就定死。只要 secrets/web.token 被重新生成
+// （换 token、另一处初始化、升级后重跑 run-web.sh），运行中的网关就会一直拿旧值，
+// 用户从文件里抄来的 token 反而永远「不对」——这是「卡 token 验证」最隐蔽的一种成因。
+// 另外这条链上还有个坑：proot 里的 $DATA 和宿主解析出来可能不是同一个目录，
+// 于是「网关读的文件」和「action.sh 打印的文件」可以不是同一份。这里把两个候选都认，
+// 谁有内容用谁，并把「实际用了哪个」写进日志和 /__info，免得再靠猜。
+const TOKEN_FILES = [...new Set([
+  process.env.WEB_TOKEN_FILE,
+  '/data/adb/tinda-bot/secrets/web.token',
+  process.env.TINDA_DATA ? path.join(process.env.TINDA_DATA, 'secrets', 'web.token') : '',
+].filter(Boolean))];
+
+/** 目的：算 token 的公开指纹（SHA-256 前 8 位），用于页面和日志里比对是不是同一份。 */
+function tokenFp(t) { return t ? crypto.createHash('sha256').update(String(t)).digest('hex').slice(0, 8) : '-'; }
+
+/** 目的：读某个候选 token 文件；读不到返回空串（不抛错）。 */
+function readTokenFile(file) {
+  try { return fs.readFileSync(file, 'utf8').trim(); } catch (e) { return ''; }
+}
+
+/** 目的：按顺序挑第一个有内容的 token 文件。输出：{file, token}；全都没有时 file=''。 */
+function pickTokenFile() {
+  for (const file of TOKEN_FILES) {
+    const t = readTokenFile(file);
+    if (t) return { file, token: t };
+  }
+  return { file: '', token: '' };
+}
+
+// 启动值：环境变量优先，环境变量为空就现场读文件（避免「文件有 token 却拒绝启动」）。
+let TOKEN = String(process.env.WEB_TOKEN || '').trim() || pickTokenFile().token;
+let TOKEN_FILE = '';
+let tokenStamp = '';
+
+/**
+ * 目的：取当前有效的 token；文件变了就自动跟上。
+ * 输入：无。
+ * 输出：token 字符串；全读不到时返回内存里的旧值。
+ * 失败：不抛错、不自锁。
+ * 副作用：可能更新 TOKEN/TOKEN_FILE 并打一行日志。
+ */
+function currentToken() {
+  const picked = pickTokenFile();
+  if (!picked.token) return TOKEN;
+  const stamp = picked.file + '|' + picked.token;
+  if (stamp !== tokenStamp) {
+    const first = !tokenStamp;
+    tokenStamp = stamp;
+    TOKEN_FILE = picked.file;
+    if (!first && picked.token !== TOKEN) {
+      console.log('[web] token 跟随文件变化：旧指纹=' + tokenFp(TOKEN) + ' 新指纹=' + tokenFp(picked.token) + ' 文件=' + picked.file);
+    }
+    TOKEN = picked.token;
+  }
+  return TOKEN;
+}
+
+// 启动横幅：把「我在哪、读的哪个 token 文件、它的指纹」写进镜像日志。
+// 出现过的事故是：日志里只有 listening，查不到它到底用了哪份 token，于是所有判断都靠猜。
+{
+  const fromEnv = String(process.env.WEB_TOKEN || '').trim();
+  const picked = pickTokenFile();
+  const cand = TOKEN_FILES.map((file) => {
+    let st = '不存在';
+    try { st = new Date(fs.statSync(file).mtimeMs).toISOString(); } catch (e) { st = '读不到'; }
+    return file + '（' + st + ' 指纹=' + tokenFp(readTokenFile(file)) + '）';
+  });
+  console.log('[web] 启动 pid=' + process.pid + ' node=' + process.version + ' data=' + (process.env.TINDA_DATA || '?') + ' cwd=' + process.cwd());
+  console.log('[web] token 候选：' + (cand.join('；') || '(无)'));
+  console.log('[web] token 采用：' + (picked.file || '(没有可读的 token 文件，用环境变量)') + ' 长度=' + TOKEN.length + ' 指纹=' + tokenFp(TOKEN));
+  if (fromEnv && picked.token && fromEnv !== picked.token) {
+    console.error('[web] 警告：环境变量里的 token 与文件不一致（env=' + tokenFp(fromEnv) + ' file=' + tokenFp(picked.token) + '），以文件为准');
+  }
+}
 
 // token 是控制台唯一的门；为空时默认拒绝启动，避免 0.0.0.0 + 无鉴权把 DSH/NapCat 暴露到局域网。
 if (!TOKEN && !ALLOW_NO_TOKEN) {
@@ -114,9 +209,10 @@ function withoutGatewayCookie(header) {
 
 /** 目的：给浏览器种 HttpOnly 的网关 cookie；页面脚本读不到 token。 */
 function setTokenCookie(res) {
-  if (!TOKEN) return;
+  const cur = currentToken();
+  if (!cur) return;
   const secure = useTls ? '; Secure' : '';
-  res.setHeader('set-cookie', `${COOKIE}=${encodeURIComponent(TOKEN)}; Path=/; HttpOnly; SameSite=Lax${secure}`);
+  res.setHeader('set-cookie', `${COOKIE}=${encodeURIComponent(cur)}; Path=/; HttpOnly; SameSite=Lax${secure}`);
 }
 
 /** 目的：清掉网关 cookie（退出登录）。 */
@@ -127,11 +223,12 @@ function clearTokenCookie(res) {
 
 /** 目的：判断请求是否已通过网关鉴权；query 里的 k 只用于首次进入，cookie 是常态。 */
 function authed(req, url) {
-  if (ALLOW_NO_TOKEN && !TOKEN) return true;
+  const cur = currentToken();
+  if (!cur) return ALLOW_NO_TOKEN;
   const q = url.searchParams.get('k');
-  if (q && tokenEquals(q, TOKEN)) return true;
+  if (q && tokenEquals(q, cur)) return true;
   const c = cookieValue(req.headers.cookie, COOKIE);
-  return Boolean(c) && tokenEquals(c, TOKEN);
+  return Boolean(c) && tokenEquals(c, cur);
 }
 
 const RESET_HTML = `<!doctype html><meta charset="utf-8"><title>重置面板登录</title>
@@ -165,7 +262,8 @@ function serveUi(res) {
   if (fs.existsSync(ui)) {
     const body = fs.readFileSync(ui, 'utf8')
       .replace('__P_DSH__', String(ORIGIN_PORTS.dsh || 0))
-      .replace('__P_NAPCAT__', String(ORIGIN_PORTS.napcat || 0));
+      .replace('__P_NAPCAT__', String(ORIGIN_PORTS.napcat || 0))
+      .replace(/__TOKEN_FP__/g, tokenFp(currentToken()));
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
     return res.end(body);
   }
@@ -435,7 +533,19 @@ function proxyForward(prefix, subPath, search, req, res, mappedRoot = false) {
     if (!mappedRoot && typeof loc === 'string' && loc.startsWith('/') && !loc.startsWith(prefix)) {
       responseHeaders.location = prefix.replace(/\/$/, '') + loc;
     }
-    res.writeHead(upRes.statusCode || 502, responseHeaders);
+    try {
+      res.writeHead(upRes.statusCode || 502, responseHeaders);
+    } catch (e) {
+      // 下游回了带非法字符/冲突的响应头，writeHead 会抛；抛出去就是「请求悬空」。
+      console.error('[web] 下游响应头不合法 ' + prefix + '：' + e.message);
+      upRes.resume();
+      if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      return res.end('下游响应头不合法');
+    }
+    upRes.on('error', (e) => {
+      console.error('[web] 下游响应中断 ' + prefix + '：' + (e.code || e.message));
+      res.destroy();
+    });
     upRes.pipe(res);
   });
   proxy.on('error', (e) => {
@@ -459,9 +569,24 @@ function proxyForward(prefix, subPath, search, req, res, mappedRoot = false) {
 
 /** 目的：给某个下游开一个「根路径即下游根」的端口，供其前端用绝对路径正常取资源。 */
 function originHandler(prefix) {
-  return function handle(req, res) {
-    const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
-    if (TOKEN && url.searchParams.get('k') === TOKEN) setTokenCookie(res);
+  // 与主入口同样的保护：畸形 URL 之类的同步异常必须变成 500，不能让请求悬空。
+  return function entry(req, res) {
+    try {
+      const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
+      return handleOrigin(prefix, req, res, url);
+    } catch (e) {
+      console.error('[web] 根端口处理出错 ' + prefix + ' ' + (req.method || '?') + ' ' + (req.url || '?') + '：' + ((e && e.stack) || e));
+      if (!res.headersSent) {
+        try { res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }); } catch (e2) { /* 已发头 */ }
+      }
+      try { res.end('网关内部错误'); } catch (e3) { /* 连接已断 */ }
+    }
+  };
+}
+
+/** 目的：根端口的具体路由（补斜杠 / 退出 / 重置 / 鉴权 / 反代）。 */
+function handleOrigin(prefix, req, res, url) {
+    { const k = url.searchParams.get('k'); if (k && tokenEquals(k, currentToken())) setTokenCookie(res); }
     if (url.pathname === '/healthz') { res.writeHead(200, { 'content-type': 'text/plain' }); return res.end('ok'); }
     if (url.pathname === '/logout') { clearTokenCookie(res); res.writeHead(302, { location: '/' }); return res.end(); }
     // 重置面板登录：NapCat 的凭据只存在浏览器里，换过 token 或凭据过期就只能清掉重来。
@@ -472,7 +597,6 @@ function originHandler(prefix) {
     }
     if (!authed(req, url)) return unauthorized(res);
     return forward(prefix, url.pathname, url.search, req, res, true);
-  };
 }
 
 const servers = [];
@@ -487,10 +611,20 @@ function listen(server, port, name, fatal) {
   server.listen(port, BIND, () => console.log(`[web] ${name} → ${useTls ? 'https' : 'http'}://${BIND}:${port}/`));
 }
 
+// keep-alive 空闲连接由**服务器**先关掉时，浏览器若正好在这时复用它，就会收到 RST，
+// 表现是「偶尔 ERR_CONNECTION_RESET」「刷新一次又好了」。node 默认只留 5 秒，
+// 比浏览器的空闲保持短得多，属于必然撞车。留 65 秒：比常见浏览器（60 秒）长一档。
+const KEEPALIVE_MS = Number(process.env.WEB_KEEPALIVE_MS || 65000);
+
 function createServer(handler) {
-  return useTls
+  const s = useTls
     ? https.createServer({ cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, handler)
     : http.createServer(handler);
+  s.keepAliveTimeout = KEEPALIVE_MS;
+  s.headersTimeout = KEEPALIVE_MS + 5000;
+  s.requestTimeout = 300000;
+  s.timeout = 0;
+  return s;
 }
 
 // 进程级异常必须落日志：真机上出现过「听过端口、然后既不响应也不退出」，
@@ -524,37 +658,76 @@ if (HEARTBEAT) {
   setInterval(beat, 30000).unref();
 }
 
-// 控制台输出双写一份到共享存储：网关的启动/崩溃信息原本只进 $DATA/logs/web.log，
-// 那目录只有 root 能读，于是外面看到的永远是「启动网关…」之后再无一行。
-const MIRROR_LOG = process.env.TINDA_MIRROR_LOG || '';
-if (MIRROR_LOG) {
-  let mirrorWarned = false;
-  const tee = (fn) => (...args) => {
-    fn(...args);
-    try {
-      fs.appendFileSync(MIRROR_LOG, new Date().toISOString() + ' ' + args.map(String).join(' ') + '\n');
-    } catch (e) {
-      if (!mirrorWarned) {
-        mirrorWarned = true;
-        fn('[web] 控制台镜像写不进去：' + (e.code || e.message));
-      }
-    }
-  };
-  console.log = tee(console.log.bind(console));
-  console.error = tee(console.error.bind(console));
-}
-
+/**
+ * 目的：所有请求的统一入口；任何同步异常都必须变成 500 响应，绝不能让请求悬着。
+ * 输入：node 的 req/res。
+ * 输出：无。
+ * 失败：handler 抛错时记一行日志并回 500；响应已发出就只断开。
+ * 副作用：写日志、可能写一次响应。
+ * 为什么：以前 handler 里的同步异常（畸形 URL、非法响应头）会被 uncaughtException 接住，
+ *         进程不死、但那个请求**永远没有响应**——浏览器端看到的正是「一直转圈/验证中…」。
+ */
 const handler = (req, res) => {
+  try {
+    const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
+    return handle(req, res, url);
+  } catch (e) {
+    console.error('[web] 处理请求出错 ' + (req.method || '?') + ' ' + (req.url || '?') + '：' + ((e && e.stack) || e));
+    if (!res.headersSent) {
+      try { res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' }); } catch (e2) { /* 头已发则放弃 */ }
+    }
+    try { res.end('网关内部错误'); } catch (e3) { /* 连接已断 */ }
+  }
+};
+
+/** 目的：真正分发请求；由 handler 包一层，异常不会逃出去。 */
+function handle(req, res, url) {
   REQ_COUNT += 1;
-  const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));
+  // 访问日志：只记「有人真的请求过」这件事证据。
+  // 面板每 4 秒轮询 /_/status、iframe 里有大量静态资源，这些跳过；错误一律记。
+  // 没有这行日志时，用户说打不开、我这边却探测 200，双方永远对不上账。
+  {
+    const _t0 = Date.now();
+    const _p = url.pathname;
+    const _noisy = _p === '/_/status' || _p.startsWith('/assets/') || _p === '/favicon.ico' || _p === '/healthz';
+    res.on('finish', () => {
+      const code = res.statusCode;
+      if (_noisy && code < 400) return;
+      const from = (req.socket && req.socket.remoteAddress) || '?';
+      const ua = String(req.headers['user-agent'] || '').slice(0, 40);
+      console.log('[web] ' + req.method + ' ' + _p + ' ' + code + ' ' + (Date.now() - _t0) + 'ms from=' + from + (ua ? ' ua=' + ua : ''));
+    });
+  }
 
   // 用 ?k=<token> 首次进入时种 cookie；之后 iframe/子端口都靠 cookie。
   // token 不再写进页面 HTML 或 iframe 地址，避免出现在历史记录与 Referer 里。
-  if (TOKEN && url.searchParams.get('k') === TOKEN) setTokenCookie(res);
+  { const k = url.searchParams.get('k'); if (k && tokenEquals(k, currentToken())) setTokenCookie(res); }
 
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' });
     return res.end('ok');
+  }
+  // 这台服务器是谁：公开的自我说明（不含 token）。查「打不开」先看它——
+  // 版本、pid、数据目录、token 文件与指纹，一眼能判断是不是撞到了旧实例或旧 token。
+  if (url.pathname === '/__info') {
+    const prop = moduleProp();
+    const cur = currentToken();
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end(JSON.stringify({
+      ok: true, version: prop.version || '?', code: prop.versionCode || '?', pid: process.pid,
+      node: process.version, script: process.argv[1] || '?', cwd: process.cwd(),
+      startedAt: new Date(STARTED_AT).toISOString(),
+      uptime: Math.round((Date.now() - STARTED_AT) / 1000), requests: REQ_COUNT,
+      data: TINDA_DATA, moddir: TINDA_MODDIR,
+      tokenFile: TOKEN_FILE, tokenFp: tokenFp(cur), tokenLen: cur.length,
+      tokenFiles: TOKEN_FILES.map((file) => {
+        let mtime = null;
+        try { mtime = new Date(fs.statSync(file).mtimeMs).toISOString(); } catch (e) { mtime = null; }
+        const t = readTokenFile(file);
+        return { file, mtime, len: t.length, fp: tokenFp(t) };
+      }),
+      bind: BIND, port: PORT, tls: useTls, keepAliveMs: KEEPALIVE_MS
+    }));
   }
   if (url.pathname === '/logout') {
     clearTokenCookie(res);
@@ -591,7 +764,7 @@ const handler = (req, res) => {
   }
   if (url.pathname === '/module/token') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-    return res.end(JSON.stringify({ token: TOKEN }));
+    return res.end(JSON.stringify({ token: currentToken() }));
   }
 
   // 反代

@@ -235,3 +235,8 @@
 - 目录：originals/20261119-201905-v0.6.2-console-mirror
 - 清单：SHA256SUMS
 
+## 20261120-004229 — v0.6.3-token与访问日志
+- 文件数：147
+- 目录：originals/20261120-004229-v0.6.3-token与访问日志
+- 清单：SHA256SUMS
+

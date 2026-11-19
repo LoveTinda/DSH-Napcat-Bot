@@ -37,10 +37,17 @@ PORT=$(conf_get WEB_PORT 8443)
 IP=$(conf_get WEB_LAN_IP "")
 [ -n "$IP" ] || IP=$(/system/bin/ip -4 addr show wlan0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
 TOKEN=$(cat "$DATA/secrets/web.token" 2>/dev/null)
+# token 指纹（sha256 前 8 位）：和 /__info 里的一比，就知道网关读的是不是同一份文件。
+# 之前正是这条线索缺失，才出现「这里印的 token 在那个网关上永远不对」。
+FP=""
+if [ -n "$TOKEN" ] && command -v sha256sum >/dev/null 2>&1; then
+  FP=$(printf '%s' "$TOKEN" | sha256sum | cut -c1-8)
+fi
 
 echo ""
 if [ -n "$TOKEN" ]; then
   URL="https://${IP:-<手机IP>}:$PORT/module/?k=$TOKEN"
+  echo "token 指纹：${FP:-?}（/__info 里应完全相同；不同 = 网关读的是另一份 token）"
   echo "模块信息：$URL"
   echo "控制台：https://${IP:-<手机IP>}:$PORT/?k=$TOKEN"
   # Magisk 没有 WebUI 容器，直接拉起浏览器；失败也不影响面板已经起来。

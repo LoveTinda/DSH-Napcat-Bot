@@ -78,7 +78,8 @@
 <div id="gate">
   <div class="card">
     <h3>需要访问 token</h3>
-    <p>从 <code>https://&lt;局域网IP&gt;:8443/?k=&lt;WEB_TOKEN&gt;</code> 进入，或在这里输入。token 在设备的 <code>secrets/web.token</code> 里。</p>
+    <p>从 <code>https://&lt;局域网IP&gt;:8443/?k=&lt;WEB_TOKEN&gt;</code> 进入，或在这里输入。token 在模块数据目录的 <code>secrets/web.token</code> 里。</p>
+    <p>服务器 token 指纹：<code id="fp">__TOKEN_FP__</code><br><span style="font-size:12px">输入后会立刻比对你填的 token，对不上就直接告诉你两边各是什么。</span></p>
     <input id="tok" type="password" placeholder="token" autocomplete="off" autocapitalize="off" spellcheck="false">
     <button id="go" type="button">进入</button>
     <p id="err" role="status"></p>
@@ -107,6 +108,16 @@ const gate = document.getElementById('gate');
     : location.protocol + '//' + location.hostname + ':' + (location.port || 8443) + '/reset';
 })();
 const err = document.getElementById('err');
+// 服务器 token 的 SHA-256 前 8 位（由网关注入）。手输 token 被拒时并排显示两边指纹：
+// 「token 不对」不再是一句无名火，而是能直接看出是抄错了、还是服务器换了另一份 token。
+const SERVER_FP = document.getElementById('fp').textContent.trim();
+/** 目的：算一段文字的 SHA-256 前 8 位，用来和服务器的指纹比对。 */
+async function fpOf(t) {
+  try {
+    const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(t));
+    return Array.from(new Uint8Array(d)).map(function (b) { return b.toString(16).padStart(2, '0'); }).join('').slice(0, 8);
+  } catch (e) { return '（本浏览器算不了）'; }
+}
 const tok = document.getElementById('tok');
 const go = document.getElementById('go');
 
@@ -163,7 +174,7 @@ function setDots(s) {
 /** 目的：检查 token 与三个下游状态；401 时显示 gate，其余错误显示离线提示。 */
 async function refresh() {
   try {
-    const r = await fetch('/_/status', { cache: 'no-store', credentials: 'same-origin' });
+    const r = await fetch('/_/status', { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(8000) });
     if (r.status === 401) {
       gate.classList.remove('hide');
       off.classList.add('hide');
@@ -184,7 +195,9 @@ async function refresh() {
     if (!loaded) switchTo(current);
     else showOff(!s[current]);
   } catch (e) {
-    offmsg.textContent = '连不上控制台（网络或网关进程）。';
+    offmsg.textContent = (e && (e.name === 'TimeoutError' || e.name === 'AbortError'))
+      ? '网关 8 秒没回话（进程可能被冻结或没在监听）。'
+      : '连不上控制台（网络或网关进程）。';
     off.classList.remove('hide');
   }
 }
@@ -208,18 +221,27 @@ go.onclick = async function () {
   go.disabled = true;
   err.textContent = '验证中…';
   try {
-    const r = await fetch('/_/status?k=' + encodeURIComponent(t), { cache: 'no-store', credentials: 'same-origin' });
+    // 8 秒上限：网关被冻结/没在监听时，fetch 会一直挂着，界面就永远停在「验证中…」。
+    // 卡住必须说出来，不能让用户对着转圈猜。
+    const r = await fetch('/_/status?k=' + encodeURIComponent(t), {
+      cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(8000)
+    });
     if (r.ok) {
       err.textContent = '';
       gate.classList.add('hide');
       await refresh();
     } else if (r.status === 401) {
-      err.textContent = 'token 不对';
+      const mine = await fpOf(t);
+      err.textContent = 'token 对不上：服务器要 ' + SERVER_FP + '，你输入的是 ' + mine;
     } else {
       err.textContent = '状态接口返回 HTTP ' + r.status;
     }
   } catch (e) {
-    err.textContent = '网络错误，稍后重试';
+    if (e && (e.name === 'TimeoutError' || e.name === 'AbortError')) {
+      err.textContent = '网关 8 秒没回话：进程可能被冻结了，或者 8443 上没有网关';
+    } else {
+      err.textContent = '网络错误（' + ((e && e.message) || 'unknown') + '）';
+    }
   } finally {
     go.disabled = false;
   }
