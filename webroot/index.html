@@ -33,6 +33,19 @@ button:active{opacity:.7}
 <h1>Tinda Bot</h1>
 <div class="sub" id="sub">读取中…</div>
 <div id="root"></div>
+
+<section id="upd">
+  <h2>更新</h2>
+  <div class="row"><div class="k">当前</div><div class="v" id="u-cur">读取中…</div></div>
+  <div class="row"><div class="k">远端</div><div class="v" id="u-rem">还没检查</div></div>
+  <div class="btns">
+    <button id="u-check">检查更新</button>
+    <button class="ghost" id="u-dl">下载新版本</button>
+    <button class="ghost" id="u-copy">复制下载地址</button>
+  </div>
+  <div class="sub" style="margin:6px 0 0">管理器自带的检查会被 raw.githubusercontent 的 CDN 缓存拖几分钟；这里每次带时间戳取，绕开缓存。</div>
+</section>
+
 <script>
 var MOD="/data/adb/modules/tinda-bot";
 var DATA="/data/adb/tinda-bot";
@@ -50,6 +63,87 @@ function toast(m){try{if(window.ksu&&ksu.toast)ksu.toast(m);}catch(e){}}
 function row(k,v,cls){return "<div class=\"row\"><div class=\"k\">"+esc(k)+"</div><div class=\"v"+(cls?" "+cls:"")+"\">"+v+"</div></div>";}
 function pill(on,a,b){return "<span class=\"pill "+(on?"on":"off")+"\">"+esc(on?a:b)+"</span>";}
 var TOKEN="", IP="", PORT="8443";
+var CUR_VER="", CUR_CODE=0;
+var REPO="LoveTinda/DSH-Napcat-Bot";
+var ZIP_URL="https://raw.githubusercontent.com/"+REPO+"/dist/tinda-bot-magisk.zip";
+var CHANGE_URL="https://github.com/"+REPO+"/blob/main/CHANGELOG.md";
+// 三个都能直连的源：raw 主用；jsDelivr 与代理做兜底（国内网络 raw 常被拖慢）。
+var PROP_MIRRORS=[
+  "https://raw.githubusercontent.com/"+REPO+"/main/module.prop",
+  "https://cdn.jsdelivr.net/gh/"+REPO+"@main/module.prop",
+  "https://ghfast.top/https://raw.githubusercontent.com/"+REPO+"/main/module.prop"
+];
+
+/** 目的：取一段远程文本，带超时；失败 reject 出简短原因。 */
+function fetchText(url,ms){
+  return new Promise(function(res,rej){
+    var ac=null, timer=null;
+    try{ac=new AbortController();}catch(e){}
+    timer=setTimeout(function(){try{ac&&ac.abort();}catch(e){} rej(new Error("超时"));},ms||9000);
+    var opt={cache:"no-store"};
+    if(ac)opt.signal=ac.signal;
+    fetch(url,opt).then(function(r){
+      clearTimeout(timer);
+      if(!r.ok)return rej(new Error("HTTP "+r.status));
+      r.text().then(res,function(e){rej(e);});
+    },function(e){clearTimeout(timer);rej(e);});
+  });
+}
+
+/** 目的：解析 module.prop 文本成对象。 */
+function parseProp(t){
+  var o={};
+  String(t||"").split(String.fromCharCode(10)).forEach(function(l){
+    var i=l.indexOf("=");
+    if(i>0)o[l.slice(0,i).trim()]=l.slice(i+1).trim();
+  });
+  return o;
+}
+
+/** 目的：依次试镜像；成功返回 {prop,url}。 */
+function fetchProp(i){
+  i=i||0;
+  if(i>=PROP_MIRRORS.length)return Promise.reject(new Error("所有源都不可达"));
+  var url=PROP_MIRRORS[i]+"?ts="+Date.now();
+  return fetchText(url,9000).then(function(txt){
+    var p=parseProp(txt);
+    if(!p.version)throw new Error("返回内容不是 module.prop");
+    return {prop:p,url:url};
+  }).catch(function(){return fetchProp(i+1);});
+}
+
+/** 目的：比较远端与本地版本，更新界面。 */
+function checkUpdate(){
+  var cur=document.getElementById("u-cur"), rem=document.getElementById("u-rem");
+  cur.textContent=(CUR_VER||"?")+"（versionCode "+(CUR_CODE||"?")+"）";
+  rem.textContent="检查中…";
+  fetchProp(0).then(function(r){
+    var rv=String(r.prop.version||"?");
+    var rc=Number(r.prop.versionCode||0);
+    if(rc>CUR_CODE){
+      rem.innerHTML="有新版本 <b>"+esc(rv)+"</b>（code "+rc+"）→ 点「下载新版本」，再在管理器里「从本地安装」";
+    }else if(rc===CUR_CODE){
+      rem.textContent="已是最新（"+rv+"）";
+    }else{
+      rem.textContent="远端比本地旧（"+rv+" / code "+rc+"）：你可能装了测试版";
+    }
+    try{localStorage.setItem("tinda_upd",JSON.stringify({rv:rv,rc:rc,at:Date.now()}));}catch(e){}
+  }).catch(function(e){
+    rem.textContent="检查失败："+(e&&e.message||"网络不可达")+"（可点「下载新版本」直接在浏览器打开 zip）";
+  });
+}
+
+/** 目的：在浏览器里打开 zip（Android 会走下载器），之后去管理器「从本地安装」。 */
+function downloadUpdate(){
+  toast("正在打开下载地址…");
+  sh("am start --user 0 -a android.intent.action.VIEW -d '"+ZIP_URL+"' >/dev/null 2>&1; echo ok");
+  setTimeout(function(){toast("下载完在管理器里「模块 → 从本地安装」");},1500);
+}
+
+/** 目的：复制 zip 地址，方便贴到别处下载。 */
+function copyZip(){
+  try{navigator.clipboard.writeText(ZIP_URL);toast("已复制下载地址");}catch(e){toast(ZIP_URL);}
+}
 
 function consoleUrl(modulePage){
   return "https://"+(IP||"127.0.0.1")+":"+PORT+(modulePage?"/module/":"/")+"?k="+encodeURIComponent(TOKEN);
@@ -128,6 +222,18 @@ function load(){
     sub.textContent="读取失败："+e.message;
   });
 }
+
+// 更新区按钮：一进页面就试一次（本地已缓存过就顺带显示出来）。
+(function wireUpdate(){
+  var b1=document.getElementById("u-check"), b2=document.getElementById("u-dl"), b3=document.getElementById("u-copy");
+  if(b1)b1.onclick=checkUpdate;
+  if(b2)b2.onclick=downloadUpdate;
+  if(b3)b3.onclick=copyZip;
+  try{
+    var last=JSON.parse(localStorage.getItem("tinda_upd")||"null");
+    if(last&&last.rv)document.getElementById("u-rem").textContent="上次检查："+last.rv+"（code "+last.rc+"，"+new Date(last.at).toLocaleString()+"）";
+  }catch(e){}
+})();
 
 if(!window.ksu){
   sub.textContent="没有检测到 KernelSU WebUI 接口：请在模块页用「打开」进入；普通浏览器访问只能看静态说明。";

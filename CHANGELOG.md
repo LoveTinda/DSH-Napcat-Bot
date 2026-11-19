@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v0.6.7
+
+两件事：**模块页里能自己检查更新**，以及**绕开 raw.githubusercontent 的 CDN 缓存**。
+
+SukiSU 检查不到几分钟内的更新，根因不在管理器：`raw.githubusercontent.com` 有 5 分钟级 CDN 缓存，
+管理器每次都取同一个 URL，于是刚发布的版本它看不见。页面里每次请求都带 `?ts=<毫秒>`，
+URL 变了就是缓存未命中，直接回源——这是唯一不依赖管理器实现的办法。
+
+### 改动
+
+- `webroot/index.html`（模块「打开」的那个页面）新增「更新」区：
+  - 当前版本 / 远端版本对比（按 versionCode）；
+  - 「检查更新」：依次试三个源（raw → jsDelivr → ghfast.top），每次带时间戳，9 秒超时；
+  - 「下载新版本」：直接在浏览器打开 dist 里的 zip，然后去管理器「从本地安装」；
+  - 「复制下载地址」；上次结果存 localStorage，重新打开能先看到。
+- `module.prop` 增加 `updateJson=`（KernelSU/SukiSU 的更新入口），管理器自带检查也能看到版本。
+- 版本：v0.6.7 / versionCode 82
+
+### 验证
+
+三个源实测：raw 200（0.7s）、jsDelivr 200（1.3s）、ghfast.top 200；页面脚本通过语法检查。
+
 ## v0.6.6
 
 日志又前进了一步，这次是**分叉本身**被抓住了：
