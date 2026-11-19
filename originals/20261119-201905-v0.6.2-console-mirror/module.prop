@@ -1,0 +1,7 @@
+id=tinda-bot
+name=Tinda Bot
+version=v0.6.2
+versionCode=77
+author=tinda
+description=QQ <-> DSH 桥接器模块：安装后直接把新代码同步进运行目录（免重启生效）；每次启动都记录跑的版本与目录；proot 按 DSH App 的环境变量跑（PROOT_TMP_DIR 等），修 can't create glue rootfs；探针带超时和面包屑；web/bridge 强制 TYPE=proot。
+updateJson=https://raw.githubusercontent.com/LoveTinda/DSH-Napcat-Bot/main/update.json

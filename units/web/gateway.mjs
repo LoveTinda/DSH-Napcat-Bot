@@ -524,6 +524,26 @@ if (HEARTBEAT) {
   setInterval(beat, 30000).unref();
 }
 
+// 控制台输出双写一份到共享存储：网关的启动/崩溃信息原本只进 $DATA/logs/web.log，
+// 那目录只有 root 能读，于是外面看到的永远是「启动网关…」之后再无一行。
+const MIRROR_LOG = process.env.TINDA_MIRROR_LOG || '';
+if (MIRROR_LOG) {
+  let mirrorWarned = false;
+  const tee = (fn) => (...args) => {
+    fn(...args);
+    try {
+      fs.appendFileSync(MIRROR_LOG, new Date().toISOString() + ' ' + args.map(String).join(' ') + '\n');
+    } catch (e) {
+      if (!mirrorWarned) {
+        mirrorWarned = true;
+        fn('[web] 控制台镜像写不进去：' + (e.code || e.message));
+      }
+    }
+  };
+  console.log = tee(console.log.bind(console));
+  console.error = tee(console.error.bind(console));
+}
+
 const handler = (req, res) => {
   REQ_COUNT += 1;
   const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));

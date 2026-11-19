@@ -230,3 +230,8 @@
 - 目录：originals/20261119-201441-v0.6.1-zip-whitelist
 - 清单：SHA256SUMS
 
+## 20261119-201905 — v0.6.2-console-mirror
+- 文件数：146
+- 目录：originals/20261119-201905-v0.6.2-console-mirror
+- 清单：SHA256SUMS
+

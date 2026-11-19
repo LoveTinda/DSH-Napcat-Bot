@@ -72,6 +72,11 @@ if [ "$_cert_ok" -ne 1 ] && command -v openssl >/dev/null 2>&1; then
   chmod 600 "$KEY" "$CERT" 2>/dev/null
 fi
 
+# 网关自己的 console 输出只进 $DATA/logs/web.log（root 才能读）。把镜像目录
+# （proot 里已 bind 成可写）告诉它，让它顺手写一份到共享存储，外面才看得到
+# 「[web] listening」或者崩溃堆栈。
+export TINDA_MIRROR_LOG="${MIRROR_DIR:-/sdcard/Bridge/Logs}/web-console.log"
+
 # 模块信息页要读 module.prop / 配置 / pid / 日志；chroot 里这些路径同样可达
 # （/data/adb/tinda-bot 是指向 /var/tinda 的符号链接，模块目录是指向 /opt/tinda-bot 的）。
 export TINDA_DATA="$DATA"
