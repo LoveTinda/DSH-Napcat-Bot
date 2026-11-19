@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## v0.4.2
+
+- **模块管理器里直接更新**：`module.prop` 增加 `updateJson`，指向仓库里的 `update.json`；
+  Magisk / KernelSU 检测到 `versionCode` 变大就会出现更新提示，点一下自己下载安装，
+  不用再手动导入 zip
+- `update.json` 的 `zipUrl` 指向 `dist` 分支的 `tinda-bot-magisk.zip`（孤儿分支 + 强推，
+  仓库不会因每个版本多 350KB 历史），`changelog` 指向 `CHANGELOG.md`
+- 新增 `bin/publish-update.sh`：改完 `module.prop` 跑一次，自动同步 `update.json`、
+  把 zip 推到 `dist` 分支
+- 版本：v0.4.2 / versionCode 61
+
 ## v0.4.1
 
 真机日志给出的第一条确凿证据：`[web] 挂 /sys（只读）失败`。web 不是「缺 node」，

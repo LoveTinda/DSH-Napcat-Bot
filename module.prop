@@ -1,6 +1,7 @@
 id=tinda-bot
 name=Tinda Bot
-version=v0.4.1
-versionCode=60
+version=v0.4.2
+versionCode=61
 author=tinda
-description=QQ <-> DSH 桥接器模块：node 业务只在受限 rootfs（proot 或 chroot）里跑，绝不回退宿主；chroot 的 /sys 改为可选，不再因 sysfs 只读重挂失败而整体退出；模块页「打开」直达状态页；刷完即起 web；开机自启。
+description=QQ <-> DSH 桥接器模块：node 业务只在受限 rootfs（proot/chroot）里跑；chroot 的 /sys 可选；模块页「打开」直达状态页；刷完即起 web；开机自启。
+updateJson=https://raw.githubusercontent.com/LoveTinda/DSH-Napcat-Bot/main/update.json
