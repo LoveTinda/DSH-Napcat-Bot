@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v0.6.8
+
+v0.6.6 装上后日志显示策略「取自共享存储」了，但那一轮之后 bridge **再无一行输出**——
+配置没生成成功，进程卡在半路。原因还是同一个：**proot 的 `-b` 映射不可靠**，
+源被判成不存在就静默跳过，策略文件进不去 guest。
+
+这次的改法绕开 bind 本身：guest 的 `/tmp` 就是 `$ROOTFS/tmp`（同一份文件系统），
+宿主直接把模板和策略 `cp` 进去即可，不需要任何映射。
+
+### 改动
+
+- `run-app-proot.sh`：模板与策略**直接复制**到 `$ROOTFS/tmp/`；去掉这两条 `-b`。
+- 兜底再加一层：把策略里的 QQ 号通过 `TINDA_OWNER_QQ` 传进 guest；`app-config.mjs`
+  在策略白名单为空时用它填 `allowUsers/ownerUsers`。文件复制再失败也不会整树起不来。
+- `hotinstall.sh`：装新版时**先停 bridge**（旧实例会一直按退避重试旧逻辑，实测卡住不退）。
+- 版本：v0.6.8 / versionCode 83
+
+### 验证
+
+`TINDA_OWNER_QQ=3876238785` + 不存在的策略文件：生成结果 `allowUsers=["3876238785"]`。
+`sh -n` / `node --check` 通过。
+
 ## v0.6.7
 
 两件事：**模块页里能自己检查更新**，以及**绕开 raw.githubusercontent 的 CDN 缓存**。

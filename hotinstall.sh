@@ -25,6 +25,10 @@ VER=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)
 say "hotinstall: 模块已换成 ${VER:-unknown}（$MODDIR）"
 
 # 旧实例可能正是卡死的那个：新版 unit.sh 的 do_stop 会连整棵树一起收，杀不掉会明说。
+# 先停 bridge：旧实例会在后台按退避不断重试，换新代码后仍在跑旧逻辑。
+if sh "$MODDIR/bin/unit.sh" stop bridge >> "$LOG" 2>&1; then
+  say "hotinstall: 旧 bridge 已停止"
+fi
 if sh "$MODDIR/bin/unit.sh" stop web >> "$LOG" 2>&1; then
   say "hotinstall: 旧 web 已停止"
 else

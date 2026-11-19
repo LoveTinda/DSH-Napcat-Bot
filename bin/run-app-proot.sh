@@ -144,10 +144,25 @@ TOKEN=""
 # 5) proot 参数不在这里拼：交给 bin/proot-run.sh，和 web 共用同一份（照抄 DSH App
 #    自己启动 proot 的命令行）。这里只声明额外 bind，且只挂运行必需面：
 #    模块 app/、状态、配置、qq profile。不 bind /data、/sdcard。
-# 策略文件优先挂共享存储那份：它是唯一被验证过「宿主与 guest 都看得见」的位置。
-_policy_bind="$SHARED_POLICY"
-[ -s "$_policy_bind" ] || _policy_bind="$POLICY"
-BINDS="$MODDIR/app:/tmp/tinda-app $STATE:/tmp/tinda-state $MODDIR/bin:/tmp/tinda-bin $MODDIR/app/config.example.json:/tmp/tinda-template.json $_policy_bind:/tmp/tinda-policy.json"
+# 配置模板与策略**直接复制**进 rootfs 的 /tmp：guest 的 /tmp 就是 $ROOTFS/tmp（同一份文件），
+# 不用 -b 映射。真机上 -b 的源被判成「不存在」就被静默跳过，这正是策略一直进不去的原因。
+mkdir -p "$ROOTFS/tmp" 2>/dev/null
+cp "$MODDIR/app/config.example.json" "$ROOTFS/tmp/tinda-template.json" 2>/dev/null   || log warn "复制配置模板到 guest /tmp 失败"
+_policy_src="$SHARED_POLICY"
+[ -s "$_policy_src" ] || _policy_src="$POLICY"
+if [ -s "$_policy_src" ]; then
+  cp "$_policy_src" "$ROOTFS/tmp/tinda-policy.json" 2>/dev/null     || log warn "复制策略到 guest /tmp 失败（会用模板默认值）"
+else
+  log warn "没有可读的策略文件：白名单可能为空，桥接器会拒绝启动"
+fi
+# 兜底：把策略里的第一个 QQ 号当 owner 传进去。就算文件复制再次失败，app-config.mjs
+# 也会用它填 allowUsers，不至于因为「白名单为空」整棵树起不来。
+_owner=$(tr -dc '0-9' < "$ROOTFS/tmp/tinda-policy.json" 2>/dev/null | head -c 12)
+case "$_owner" in
+  [0-9][0-9][0-9][0-9][0-9]*) export TINDA_OWNER_QQ="$_owner" ;;
+esac
+
+BINDS="$MODDIR/app:/tmp/tinda-app $STATE:/tmp/tinda-state $MODDIR/bin:/tmp/tinda-bin"
 [ "$BIND_PROFILE" = "1" ] && BINDS="$BINDS $PROFILE_DST:/root/.dsh/profiles/qq"
 
 # guest 环境：PATH/HOME/TMPDIR/TZ/TINDA_IN_PROOT 由 proot-run.sh 统一设置，

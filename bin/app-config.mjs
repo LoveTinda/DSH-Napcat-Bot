@@ -34,6 +34,20 @@ try {
   if (err.code !== 'ENOENT') console.error('warn 读取策略失败：' + err.message);
 }
 
+// 兜底：策略文件没读到、或里面白名单为空时，用宿主传进来的 owner QQ 顶上。
+// 没有这一步，桥接器就会按设计 fail-closed，整个单元起不来（真机踩过两次）。
+{
+  const owner = String(process.env.TINDA_OWNER_QQ || '').trim();
+  const list = cfg.policy && Array.isArray(cfg.policy.allowUsers) ? cfg.policy.allowUsers : [];
+  const empty = list.length === 0 || list.every((x) => !/^\d{5,12}$/.test(String(x)));
+  if (empty && /^\d{5,12}$/.test(owner)) {
+    cfg.policy = cfg.policy || {};
+    cfg.policy.allowUsers = [owner];
+    cfg.policy.ownerUsers = cfg.policy.ownerUsers && cfg.policy.ownerUsers.length ? cfg.policy.ownerUsers : [owner];
+    console.error('warn 策略里没有可用 QQ，已用 TINDA_OWNER_QQ=' + owner + ' 兜底');
+  }
+}
+
 if (api) {
   const base = String(api).replace(/\/+$/, '').replace(/^http/i, 'ws');
   cfg.onebot = cfg.onebot || {};
