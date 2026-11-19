@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v0.4.4
+
+- **每次退避重启都带日志**：supervisor 循环在单元退出后把 `<unit>.log` 尾部 6 行写回
+  supervisor（因此也进 `/sdcard/Bridge/Logs/supervisor.log`）。之前只有「未确认运行」才带，
+  而单元「启动后立刻退出」这种情况（rc=0/1）恰好不带，导致只能看到 rc 看不到原因
+- 版本：v0.4.4 / versionCode 63
+- 背景：真机日志出现过 `web 退出 rc=1` 与 `rc=0` 交替，但单元日志没被带出来；同时发现
+  开发机上的临时网关一直占着 8443，rc=1 很可能就是它导致的端口冲突（已停）
+
 ## v0.4.3
 
 - **日志镜像到共享存储**：`bin/lib.sh` 的 `log()` 在写 `$DATA/logs/supervisor.log` 的同时，

@@ -259,6 +259,11 @@ do_start() {
       fails=$((fails+1))
       [ "$fails" -ge "$RESTART_MAX" ] && { log fatal "$NAME 连续失败 $fails 次，停止重试"; break; }
       log warn "$NAME 退出 rc=$rc（第 $fails 次），退避重启"
+      # 退出原因只写在单元日志里（例如 chroot 挂载、node 报错、端口占用）。
+      # 把尾部带回 supervisor，log() 会镜像到 /sdcard/Bridge/Logs，没有 root 也能看。
+      tail -n 6 "$LOG_FILE" 2>/dev/null | while IFS= read -r _l; do
+        [ -n "$_l" ] && log warn "[$NAME] $_l"
+      done
       sleep $(( fails < 5 ? fails * 3 : BACKOFF_MAX ))
     done
     rm -f "$PID_FILE"
