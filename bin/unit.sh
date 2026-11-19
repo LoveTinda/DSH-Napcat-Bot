@@ -256,6 +256,14 @@ do_start() {
       wait $!
       rc=$?
       [ -f "$PID_FILE.stop" ] && break
+      # 78 是「环境不成立」：缺 proot/rootfs/node、参数拼不起来、bind 源不存在。
+      # 这种错重试 20 次也只是把同一行日志刷 20 遍（真机上见过），直接停。
+      if [ "$rc" = "78" ]; then
+        log fatal "$NAME 退出 78（环境不成立），不再重试"
+        mkdir -p "${MIRROR_DIR:-/sdcard/Bridge/Logs}" 2>/dev/null
+        redact < "$LOG_FILE" > "${MIRROR_DIR:-/sdcard/Bridge/Logs}/$NAME.log" 2>/dev/null
+        break
+      fi
       fails=$((fails+1))
       if [ "$fails" -ge "$RESTART_MAX" ]; then
         log fatal "$NAME 连续失败 $fails 次，停止重试"

@@ -79,6 +79,14 @@ libproot.so --help`。根因是我们自己拼的参数比 DSH App 启动 proot 
 3. 启动前跑探针，把 proot 的原始报错原样写进镜像日志——失败时先有数据，再改代码；
 4. 额外 bind 通过 `TINDA_EXTRA_BINDS` 传给同一个脚本，避免每个单元各写一份参数。
 
+**v0.4.8 实测补充**：探针打出来的真因不是参数差异，而是**环境变量**。proot 不设
+`PROOT_TMP_DIR` 时会退回构建时的 Termux 路径 `/data/data/com.termux/files/usr/tmp`，
+在那台机器上不存在，于是 `can't create temporary directory` → `can't create glue rootfs`
+→ 之后所有 execve 都是 ENOENT。DSH App 自己是靠
+`PROOT_TMP_DIR=<pkg>/cache/proot-tmp`、`PROOT_L2S_DIR=<rootfs>/root/.l2s`、
+`PROOT_LOADER=<proot 目录>/libproot-loader.so` 三项跑起来的，现在照抄。
+教训：**"照抄那唯一一份能跑的命令行"要连环境一起照抄**，只看 argv 会漏掉这类致命项。
+
 ## 何时重审
 
 - DSH App 换了 proot 实现或 rootfs 布局；

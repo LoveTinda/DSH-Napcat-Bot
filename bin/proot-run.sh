@@ -22,6 +22,16 @@ MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)}
 . "$MODDIR/bin/lib-proot.sh"
 ensure_dirs
 
+# 管理器更新模块时，旧代码目录会被删、新代码在 modules_update/<id>；如果更新前启动的
+# supervisor 还活着，它环境里的 MODDIR 已经指向一个不存在的路径。真机日志里就是
+#   proot warning: sanitizing the guest path (binding) "/data/adb/modules/tinda-bot"
+# 所以以脚本自身位置为准，环境里的 MODDIR 只当缺省值。
+_HERE=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd)
+if [ -n "$_HERE" ] && [ "$_HERE" != "$MODDIR" ] && [ -f "$_HERE/bin/proot-run.sh" ]; then
+  log warn "MODDIR=$MODDIR 与实际脚本位置 $_HERE 不一致，按实际位置走"
+  MODDIR=$_HERE
+fi
+
 case "${1:-}" in
   probe|--probe) _is_probe=1; shift ;;
   *) _is_probe=0 ;;
@@ -39,6 +49,33 @@ for _f in /bin/sh /usr/local/bin/node; do
   [ -e "$PROOT_ROOTFS$_f" ] || { log error "rootfs 里缺 $_f：$PROOT_ROOTFS"; exit 78; }
 done
 
+# proot 的三个环境变量必须照 DSH App 自己设：不设 PROOT_TMP_DIR 时它会用构建时的
+# Termux 路径 /data/data/com.termux/files/usr/tmp，真机日志是
+#   proot error: can't create temporary directory: No such file or directory
+#   proot error: can't create glue rootfs
+#   proot error: execve("/usr/bin/env"): No such file or directory   ← 后面全跟着失败
+# 也就是 guest 根本没被建起来，在此之前改多少 exec 参数都没用。
+_APPDATA=$(dirname "$(dirname "$(dirname "$PROOT_ROOTFS")")")   # …/<pkg>（rootfs 在 files/runtime 下）
+PROOT_TMP_DIR=${PROOT_TMP_DIR:-$_APPDATA/cache/proot-tmp}
+mkdir -p "$PROOT_TMP_DIR" 2>/dev/null
+if [ -z "$PROOT_TMP_DIR" ] || [ ! -w "$PROOT_TMP_DIR" ]; then
+  _fallback=/data/local/tmp/tinda-proot
+  log warn "App cache 不可写，proot 临时目录改用 $_fallback"
+  PROOT_TMP_DIR=$_fallback
+  mkdir -p "$PROOT_TMP_DIR" 2>/dev/null
+  [ -w "$PROOT_TMP_DIR" ] || { log error "没有可写的 proot 临时目录（PROOT_TMP_DIR=$PROOT_TMP_DIR）"; exit 78; }
+fi
+# --link2symlink 的硬链接目录必须在 rootfs 里，否则 link() 会跨设备失败。
+PROOT_L2S_DIR=${PROOT_L2S_DIR:-$PROOT_ROOTFS/root/.l2s}
+mkdir -p "$PROOT_L2S_DIR" 2>/dev/null
+export PROOT_TMP_DIR PROOT_L2S_DIR
+# proot 的 loader 和 libproot.so 同目录；存在才设，别给 proot 一个假路径。
+if [ -f "$_LIBDIR/libproot-loader.so" ]; then
+  PROOT_LOADER=${PROOT_LOADER:-$_LIBDIR/libproot-loader.so}
+  export PROOT_LOADER
+fi
+log info "proot 临时目录：$PROOT_TMP_DIR"
+
 # 参数靠词分割拼接，路径里有空白会拼错；这些路径都是模块固定的，出现空白说明环境异常。
 for _p in "$MODDIR" "$DATA" "$PROOT_BIN" "$PROOT_ROOTFS"; do
   case "$_p" in
@@ -47,6 +84,25 @@ for _p in "$MODDIR" "$DATA" "$PROOT_BIN" "$PROOT_ROOTFS"; do
       exit 78 ;;
   esac
 done
+
+# bind 源必须真的存在：模块目录被换掉时 proot 只会警告然后继续，
+# 到 execve 才报 "No such file or directory"，很难看出是 bind 的锅。
+for _bd in "$MODDIR:$MODDIR" "$DATA:$DATA"; do
+  _src=${_bd%%:*}
+  [ -d "$_src" ] || { log error "bind 源不存在：$_src"; exit 78; }
+done
+# 调用方给的额外 bind 里，源不存在的直接丢掉（并留一条 warn），别让 proot 带着坏参数跑。
+_BINDS_OK=""
+for _bd in ${TINDA_EXTRA_BINDS:-}; do
+  case "$_bd" in *:*) _src=${_bd%%:*} ;; *) _src=$_bd ;; esac
+  if [ -e "$_src" ]; then
+    _BINDS_OK="$_BINDS_OK $_bd"
+  else
+    log warn "跳过不存在的 bind：$_bd"
+  fi
+done
+TINDA_EXTRA_BINDS="$_BINDS_OK"
+unset _bd _src _BINDS_OK
 
 # 唯一一份 proot 参数：一行一个，调用方按词分割拼进 argv。
 # full = DSH App 用的完整扩展参数；minimal = 只有基础参数（万一换上别的 proot 构建）。

@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## v0.4.8
+
+探针第一次把 proot 的原始报错完整打了出来，原因很具体：
+
+```text
+proot warning: can't canonicalize /data/data/com.termux/files/usr/tmp/: No such file or directory
+proot error: can't create temporary directory: No such file or directory
+proot info: Please set PROOT_TMP_DIR env. variable to an alternate location (with write permission).
+proot error: can't create glue rootfs
+proot error: execve("/usr/bin/env"): No such file or directory
+```
+
+**没设 `PROOT_TMP_DIR`**，proot 就退回构建时的 Termux 路径 `/data/data/com.termux/files/usr/tmp`，
+那台机器上不存在 → 建不出 glue rootfs → guest 根本没起来，后面所有 exec 必然 ENOENT。
+之前那些「interpreter 找不到」全是这一条的后果，不是参数拼错。
+
+从 DSH App 自己的 proot 进程环境里拿到了它真正设的三个变量，照抄：
+
+- `PROOT_TMP_DIR=<pkg>/cache/proot-tmp`
+- `PROOT_L2S_DIR=<rootfs>/root/.l2s`
+- `PROOT_LOADER=<proot 目录>/libproot-loader.so`（存在才设）
+
+其他同批修掉的真机问题：
+
+- `MODDIR` 与实际脚本位置不一致时按脚本位置走（管理器更新后旧目录会被删，日志里
+  出现 `sanitizing the guest path (binding) "/data/adb/modules/tinda-bot": No such file`）
+- bind 源不存在时明确报错/跳过，不再让 proot 带着坏参数跑到 execve 才失败
+- 退出码 **78 = 环境不成立**（缺 proot/rootfs/node、参数拼不起来）时不再重试：
+  之前会原样重试 20 次、把同一段日志刷 20 遍
+- 版本：v0.4.8 / versionCode 67
+- 验证：`sh -n` 通过；门禁 0 FAIL；本地用假 proot 确认交出去的环境就是
+  `PROOT_TMP_DIR/PROOT_L2S_DIR/TINDA_IN_PROOT/PATH` 这几项、argv 顺序与 DSH App 一致
+
 ## v0.4.7
 
 v0.4.6 补上 `LD_LIBRARY_PATH` 之后，真机日志里的 `CANNOT LINK` 没了，剩下的是 proot

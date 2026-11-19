@@ -1,7 +1,7 @@
 id=tinda-bot
 name=Tinda Bot
-version=v0.4.7
-versionCode=66
+version=v0.4.8
+versionCode=67
 author=tinda
-description=QQ <-> DSH 桥接器模块：proot 参数集中到 bin/proot-run.sh 并照抄 DSH App 自己的命令行（补 --link2symlink/--sysvipc/-L 与 /dev/fd 系列 bind），启动前跑探针把 proot 原始报错写进日志；失败日志不再截断；web/bridge 强制 TYPE=proot。
+description=QQ <-> DSH 桥接器模块：proot 按 DSH App 的环境变量跑（PROOT_TMP_DIR / PROOT_L2S_DIR / PROOT_LOADER），修 can't create glue rootfs 导致 guest 起不来；参数集中到 bin/proot-run.sh；退出 78 不再无效重试；web/bridge 强制 TYPE=proot。
 updateJson=https://raw.githubusercontent.com/LoveTinda/DSH-Napcat-Bot/main/update.json
