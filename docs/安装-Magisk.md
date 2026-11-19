@@ -176,10 +176,11 @@ su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'
 模块只有 shell 和 JS，**不带 node**；NapCat/QQ 是 Android bionic 程序，**永远宿主直装**。
 `bridge` 是 `TYPE=proot`：用 DSH App 的 `libproot.so` + `runtime/rootfs` 里的 node
 跑独立进程，不要求 Android 宿主有 node；找不到 proot/rootfs 直接 78，不回落宿主。
-`web` 仍是 `TYPE=auto`：只有同时满足「有 `/data/adb`、有 rootfs、`unshare -m` 探针通过」
-才走 chroot；否则退回宿主直装。chroot 是显式能力，不是刷入即默认。
+`web` 现在是 `TYPE=proot`：和 `bridge` 用同一套 DSH App 的 `libproot.so` + `runtime/rootfs`，
+  不再走 chroot（chroot 在部分内核上 `/sys`、模块只读挂载都会失败，且 `TYPE=auto` 会在
+  开机早期先落到宿主直装）。找不到 proot/rootfs 直接 78，不回落宿主 node。
 
-### 5.1 准备 rootfs（web/chroot 用；bridge 直接用 DSH App 的 rootfs）
+### 5.1 准备 rootfs（仅当你要用旧 chroot 路径时才需要；web/bridge 现在都用 DSH App 的 rootfs）
 
 ```sh
 # 看现状：rootfs 在不在、里面的 node/npm/dsh 有没有、每个单元会怎么起

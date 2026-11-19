@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v0.4.5
+
+- **web 单元改为 `TYPE=proot`**：不再走 chroot。之前 `TYPE=auto` 会在「有 rootfs + unshare 探针
+  通过」时选 chroot，真机上 chroot 的 `/sys`、模块只读挂载接连失败，开机早期还会先落到
+  宿主直装；现在和 bridge 一样，固定用 DSH App 的 `libproot.so` + `runtime/rootfs`，
+  探测不到就 78，不换路径
+- `check-module` 增加硬性检查：`units/web/unit.conf` 必须是 `TYPE=proot`
+- 文档同步：安全模型、安装、README 里「chroot 只留给 web」的说法全部改掉；
+  chroot 代码路径保留但没有单元使用
+- 版本：v0.4.5 / versionCode 64
+- 验证：`unit.sh explain web` 显示 proot；守卫 0 FAIL / 1 warn
+
 ## v0.4.4
 
 - **每次退避重启都带日志**：supervisor 循环在单元退出后把 `<unit>.log` 尾部 6 行写回

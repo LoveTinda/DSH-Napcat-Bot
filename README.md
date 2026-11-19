@@ -9,7 +9,7 @@ QQ ↔ DSH 桥接器，跑在 Android 上：NapCat 收消息，DSH 出回答，�
 > 桥接是 `TYPE=proot`：复用 DSH App 的 `libproot.so` +
 > `runtime/rootfs` 跑独立 node；proot 进程仍由 root 启动，`-0` 只是 guest 假 root，
 > 不是降权。找不到就 78，不回落宿主；
-> chroot 只留给 `web`，且只在私有 mount namespace 里挂最小目录，见 [ADR-0008](docs/adr/0008-启动与挂载安全.md)
+> `web` 与 `bridge` 都是 `TYPE=proot`，宿主 root 域只留 supervisor，见 [ADR-0012](docs/adr/0012-业务进程只跑proot.md)
 > 和 [ADR-0010](docs/adr/0010-proot启动.md)。
 
 **现在能做什么**：QQ 私聊/群聊发消息 → 桥接器 → `dsh headless` → 回到 QQ；

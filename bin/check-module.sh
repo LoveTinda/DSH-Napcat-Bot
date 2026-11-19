@@ -86,6 +86,7 @@ check_root() {
   grep -q 'mount -o bind /data/adb' "$root/bin/unit.sh" && fail "unit.sh 仍在 bind /data/adb（递归挂载）"
   grep -q '^TYPE=exec' "$root/units/napcat/unit.conf" || fail "napcat 必须是 TYPE=exec（Android QQ 不能进 glibc rootfs）"
   grep -q '^TYPE=proot' "$root/units/bridge/unit.conf" || fail "bridge 必须是 TYPE=proot（独立 node，不 chroot、不 mount）"
+  grep -q '^TYPE=proot' "$root/units/web/unit.conf" || fail "web 必须是 TYPE=proot（用户明确要求不用 chroot）"
   # web 也只允许 proot：宿主是 Android root 域，不能跑业务 node。
   grep -q 'TINDA_IN_PROOT' "$root/bin/run-web.sh" || fail "run-web.sh 没有 proot 重入保护"
   grep -q '不回退宿主' "$root/bin/run-web.sh" || fail "run-web.sh 可能回退宿主 exec（不允许）"
