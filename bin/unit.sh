@@ -247,6 +247,8 @@ do_start() {
   # 长跑进程不会自己轮转日志；每次启动前检查一次，避免日志无限增长。
   rotate_log_file "$LOG_FILE"
   _start_sz=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
+  # 心跳文件先清空：别让上一轮的时间戳把新起的实例立刻判成卡死。
+  [ -n "$HEARTBEAT_FILE" ] && : > "$HEARTBEAT_FILE" 2>/dev/null
   log info "$NAME 启动"
   # 每次都记下跑的是哪份代码：不写这一行，就只能靠「有没有某个版本才有的日志」反推，
   # 真机上已经为此白折腾过好几轮。
@@ -319,6 +321,39 @@ do_start() {
         mkdir -p "${MIRROR_DIR:-/sdcard/Bridge/Logs}" 2>/dev/null
         redact < "$LOG_FILE" > "${MIRROR_DIR:-/sdcard/Bridge/Logs}/$NAME.log" 2>/dev/null
       fi
+    fi
+    # 心跳看门狗：就绪之后如果心跳停了，说明业务卡死（进程还在、不处理请求）。
+    # 重启用 setsid 甩出去，免得把自己这棵树杀掉后没人收尾。
+    if [ -n "$HEARTBEAT_FILE" ]; then
+      _hb_restart_file="$DATA/run/$NAME.hbrestart"
+      (
+        _hn=0
+        while [ "$_hn" -lt 15 ]; do
+          sleep 20
+          [ -f "$PID_FILE.stop" ] && exit 0
+          _hb=$(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || echo 0)
+          [ "${_hb:-0}" -gt 0 ] || continue
+          _now=$(date +%s)
+          _age=$(( _now - _hb ))
+          [ "$_age" -le "${HEARTBEAT_MAX:-100}" ] && continue
+          _hrc=$(cat "$_hb_restart_file" 2>/dev/null)
+          case "$_hrc" in ''|*[!0-9]*) _hrc=0 ;; esac
+          if [ "$_hrc" -ge 5 ]; then
+            log fatal "$NAME 心跳停了 ${_age}s，自动重启已 $_hrc 次，放弃（看 $LOG_FILE）"
+            mkdir -p "${MIRROR_DIR:-/sdcard/Bridge/Logs}" 2>/dev/null
+            redact < "$LOG_FILE" > "${MIRROR_DIR:-/sdcard/Bridge/Logs}/$NAME.log" 2>/dev/null
+            exit 0
+          fi
+          printf '%s\n' "$((_hrc+1))" > "$_hb_restart_file" 2>/dev/null
+          log fatal "$NAME 心跳停了 ${_age}s（业务卡死、进程不退出），自动重启第 $((_hrc+1)) 次"
+          if command -v setsid >/dev/null 2>&1; then
+            ( setsid sh "$MODDIR/bin/unit.sh" restart "$NAME" >/dev/null 2>&1 & )
+          else
+            ( sh "$MODDIR/bin/unit.sh" restart "$NAME" >/dev/null 2>&1 & )
+          fi
+          exit 0
+        done
+      ) >/dev/null 2>&1 &
     fi
   else
     log warn "$NAME 未确认运行，见 $LOG_FILE"

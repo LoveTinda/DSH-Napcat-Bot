@@ -493,6 +493,37 @@ function createServer(handler) {
     : http.createServer(handler);
 }
 
+// 进程级异常必须落日志：真机上出现过「听过端口、然后既不响应也不退出」，
+// 没有堆栈就只能看到一片沉默。
+process.on('uncaughtException', (e) => {
+  console.error('[web] 未捕获异常：' + ((e && e.stack) || e));
+});
+process.on('unhandledRejection', (e) => {
+  console.error('[web] 未处理的 Promise 拒绝：' + ((e && e.stack) || e));
+});
+process.on('exit', (code) => {
+  console.error('[web] 进程退出 code=' + code + ' pid=' + process.pid);
+});
+
+// 心跳：事件循环活着就每 30 秒写一次。业务卡死（进程在、但不处理请求）时心跳会停，
+// unit.sh 的心跳看门狗据此重启整棵树——比「进程还在就算好」可靠。
+const HEARTBEAT = process.env.TINDA_DATA ? path.join(process.env.TINDA_DATA, 'logs', 'web.hb') : '';
+if (HEARTBEAT) {
+  let beatWarned = false;
+  const beat = () => {
+    try {
+      fs.writeFileSync(HEARTBEAT, String(Date.now()));
+    } catch (e) {
+      if (!beatWarned) {
+        beatWarned = true;
+        console.error('[web] 心跳写不进去：' + (e.code || e.message));
+      }
+    }
+  };
+  beat();
+  setInterval(beat, 30000).unref();
+}
+
 const handler = (req, res) => {
   REQ_COUNT += 1;
   const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));

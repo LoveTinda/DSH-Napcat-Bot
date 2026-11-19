@@ -1,0 +1,14 @@
+{
+  "id": "model",
+  "version": 1,
+  "purpose": "直接调用模型的能力（群上下文排序、意图判断等旁路用途），与 DSH 内部对话路径分离。",
+  "required": {
+    "complete": "单次补全，返回文本；支持关思考、限 tokens、超时",
+    "listModels": "可选：列出可用模型"
+  },
+  "guarantees": [
+    "超时必须抛错或返回明确超时标记，由调用方决定降级",
+    "不得在请求里记录明文 key"
+  ],
+  "implementedBy": []
+}
