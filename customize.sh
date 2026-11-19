@@ -54,9 +54,9 @@ case "$AUTO" in
   *)
     ui_print "- 立即启动 web（不用等重启）"
     if command -v setsid >/dev/null 2>&1; then
-      ( MODDIR="$RUN_DIR" DATA="$DATA" nohup setsid sh "$RUN_DIR/bin/unit.sh" start web >/dev/null 2>&1 & )
+      ( MODDIR="$RUN_DIR" DATA="$DATA" nohup setsid sh "$RUN_DIR/bin/unit.sh" restart web >/dev/null 2>&1 & )
     else
-      ( MODDIR="$RUN_DIR" DATA="$DATA" nohup sh "$RUN_DIR/bin/unit.sh" start web >/dev/null 2>&1 & )
+      ( MODDIR="$RUN_DIR" DATA="$DATA" nohup sh "$RUN_DIR/bin/unit.sh" restart web >/dev/null 2>&1 & )
     fi
     sleep 2
     PORT=$(grep -E '^WEB_PORT=' "$DATA/etc/tinda.conf" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r')

@@ -235,9 +235,36 @@ spawn() {
 
 do_start() {
   [ "$TYPE" = "external" ] && { spawn; return 0; }
-  if running; then log info "$NAME 已在运行 pid=$(cat "$PID_FILE")"; return 0; fi
+  if running; then
+    # 进程活着不代表能用：卡死的 proot 会一直占着 pid 文件，于是 start 变成空转
+    # （真机日志：点了「操作」只回一句「已在运行 pid=24765」，端口永远是死的）。
+    _wedged=0
+    if [ -n "$HEARTBEAT_FILE" ]; then
+      _hb=$(stat -c %Y "$HEARTBEAT_FILE" 2>/dev/null || echo 0)
+      _now_hb=$(date +%s)
+      if [ "${_hb:-0}" -eq 0 ]; then
+        _wedged=1
+      elif [ $(( _now_hb - _hb )) -gt "${HEARTBEAT_MAX:-100}" ]; then
+        _wedged=1
+      fi
+    fi
+    if [ "$_wedged" = "1" ]; then
+      log warn "$NAME 进程还在但心跳不新鲜，判定卡死，先停掉再起"
+      do_stop
+      sleep 1
+    else
+      log info "$NAME 已在运行 pid=$(cat "$PID_FILE")"
+      return 0
+    fi
+  fi
   # PID 文件可能丢/写错；按命令行再查一次，避免旧实例占着端口时又起一个新的。
-  _stray=$(find_unit_pids)
+  _sw=0
+  while :; do
+    _stray=$(find_unit_pids)
+    [ -z "$_stray" ] && break
+    [ "$_sw" -ge 5 ] && break
+    sleep 1; _sw=$((_sw + 1))
+  done
   if [ -n "$_stray" ]; then
     log warn "$NAME 有未登记的进程：$(printf '%s' "$_stray" | tr '\n' ' ')，先 unit.sh stop $NAME"
     return 1
@@ -410,7 +437,17 @@ do_stop() {
     sleep 1; _i=$((_i + 1))
   done
   for _p in $_all; do kill -9 "$_p" 2>/dev/null; done
+  sleep 1
+  _left=""
+  for _p in $_all; do
+    [ -n "$_p" ] || continue
+    kill -0 "$_p" 2>/dev/null && _left="$_left $_p"
+  done
   rm -f "$PID_FILE.stop" "$PID_FILE" "$PID_FILE.child"
+  if [ -n "$_left" ]; then
+    log error "$NAME 有进程杀不掉：$_left（可能卡在 D 状态，重启手机后可清）"
+    return 1
+  fi
   log info "$NAME 已停止（含子进程树）"
 }
 
