@@ -56,7 +56,13 @@ CONF="$DATA/etc/app.json"
 # 不这么做，桥接器会按设计 fail-closed（policy.allowUsers 为空 → 拒绝启动），
 # 真机日志里就是「访问策略配置不安全，拒绝启动」，面板永远空着。
 POLICY=$(conf_get BRIDGE_POLICY_FILE "$DATA/etc/bridge-policy.json")
+SHARED_POLICY="$(dirname "$MIRROR_DIR")/bridge-policy.json"
 _ensure_policy() {
+  # 宿主和 proot 的 /data 实测可能是两份内容（同名不同物）：共享存储那份也算数。
+  if [ ! -s "$POLICY" ] && [ -s "$SHARED_POLICY" ]; then
+    mkdir -p "$(dirname "$POLICY")" 2>/dev/null
+    cp "$SHARED_POLICY" "$POLICY" 2>/dev/null && log info "策略取自共享存储：$SHARED_POLICY"
+  fi
   _bad=0
   [ -s "$POLICY" ] || _bad=1
   [ "$_bad" -eq 0 ] && grep -qE '"allowUsers"[[:space:]]*:[[:space:]]*\[[[:space:]]*\]' "$POLICY" && _bad=1
@@ -64,13 +70,25 @@ _ensure_policy() {
   [ "$_bad" -eq 0 ] && return 0
   _qq=$(conf_get NAPCAT_QQ "")
   if [ -z "$_qq" ]; then
-    _qq=$(ls /opt/napcat/config/ 2>/dev/null | sed -n 's/^napcat_\([0-9]\{5,12\}\)\.json$/\1/p' | head -1)
+    # 从 NapCat 的登录文件名推账号（napcat_<QQ>.json）。不用 sed 的 \{n,m\}——
+    # toybox/busybox 的 sed 对区间写法支持不一致，真机上就是这里静默失败过。
+    for _f in /opt/napcat/config/napcat_*.json; do
+      [ -f "$_f" ] || continue
+      _b=${_f##*/}
+      _q=${_b#napcat_}
+      _q=${_q%.json}
+      case "$_q" in ''|*[!0-9]*) continue ;; esac
+      _qq=$_q
+      break
+    done
   fi
   [ -n "$_qq" ] || { log warn "白名单为空，且认不出 NapCat 账号：请在 $POLICY 里填 allowUsers"; return 0; }
   mkdir -p "$(dirname "$POLICY")" 2>/dev/null
   printf '{"privateChat":"allowlist","groupChat":"mention","allowUsers":["%s"],"ownerUsers":["%s"],"allowGroups":[]}\n' "$_qq" "$_qq" > "$POLICY" || { log error "写不了策略文件 $POLICY"; return 0; }
   chmod 600 "$POLICY" 2>/dev/null
-  log warn "白名单为空/占位，已按 NapCat 账号 $_qq 生成 $POLICY（只应答该账号；要放开就改这个文件）"
+  # 同时放一份到共享存储：proot 里的 /data 可能读不到这份，人也能直接看/改。
+  printf '{"privateChat":"allowlist","groupChat":"mention","allowUsers":["%s"],"ownerUsers":["%s"],"allowGroups":[]}\n' "$_qq" "$_qq" > "$SHARED_POLICY" 2>/dev/null
+  log warn "白名单为空/占位，已按 NapCat 账号 $_qq 生成策略（只应答该账号；要放开就改这个文件）"
   return 0
 }
 _ensure_policy
@@ -126,7 +144,10 @@ TOKEN=""
 # 5) proot 参数不在这里拼：交给 bin/proot-run.sh，和 web 共用同一份（照抄 DSH App
 #    自己启动 proot 的命令行）。这里只声明额外 bind，且只挂运行必需面：
 #    模块 app/、状态、配置、qq profile。不 bind /data、/sdcard。
-BINDS="$MODDIR/app:/tmp/tinda-app $STATE:/tmp/tinda-state $MODDIR/bin:/tmp/tinda-bin $MODDIR/app/config.example.json:/tmp/tinda-template.json $POLICY:/tmp/tinda-policy.json"
+# 策略文件优先挂共享存储那份：它是唯一被验证过「宿主与 guest 都看得见」的位置。
+_policy_bind="$SHARED_POLICY"
+[ -s "$_policy_bind" ] || _policy_bind="$POLICY"
+BINDS="$MODDIR/app:/tmp/tinda-app $STATE:/tmp/tinda-state $MODDIR/bin:/tmp/tinda-bin $MODDIR/app/config.example.json:/tmp/tinda-template.json $_policy_bind:/tmp/tinda-policy.json"
 [ "$BIND_PROFILE" = "1" ] && BINDS="$BINDS $PROFILE_DST:/root/.dsh/profiles/qq"
 
 # guest 环境：PATH/HOME/TMPDIR/TZ/TINDA_IN_PROOT 由 proot-run.sh 统一设置，

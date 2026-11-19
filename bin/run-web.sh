@@ -16,50 +16,51 @@ ensure_dirs
 # proot 的参数、探测和报错全部在 bin/proot-run.sh（web 与 bridge 共用一份，照抄 DSH
 # App 自己启动 proot 的命令行）；proot-run.sh 会给 guest 导出 TINDA_IN_PROOT=1，
 # 所以这里只要能看见这个变量就说明已经在 proot 里，直接往下跑，不再套一层。
+# token 的权威是**宿主**：宿主生成后以 WEB_TOKEN 传进 guest，并写一份到共享存储给人看。
+# 为什么不能反过来：宿主和 proot 里的 /data 实测可能是两份不同内容（同名不同物），
+# 谁写谁读就对不上；共享存储 /sdcard 两边都看得见，适合当「贴给人看」的那一份。
+TOKEN_FILE="$DATA/secrets/web.token"
+SHARED_TOKEN="$(dirname "$MIRROR_DIR")/web.token"
+_ensure_token() {
+  _v=""
+  if [ -s "$TOKEN_FILE" ]; then
+    _v=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\r\n')
+  elif [ -s "$SHARED_TOKEN" ]; then
+    _v=$(cat "$SHARED_TOKEN" 2>/dev/null | tr -d '\r\n')
+    umask 077
+    printf '%s' "$_v" > "$TOKEN_FILE" 2>/dev/null
+  else
+    _tmp="$TOKEN_FILE.tmp.$$"
+    umask 077
+    head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$_tmp" || { log error "生成 web.token 失败"; rm -f "$_tmp"; return 1; }
+    mv -f "$_tmp" "$TOKEN_FILE" || { rm -f "$_tmp"; log error "写入 web.token 失败"; return 1; }
+    _v=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\r\n')
+    log info "已生成新的 web.token（32 位十六进制）"
+  fi
+  [ -n "$_v" ] || { log error "token 为空：$TOKEN_FILE"; return 1; }
+  WEB_TOKEN=$_v
+  export WEB_TOKEN
+  chmod 600 "$TOKEN_FILE" 2>/dev/null
+  { printf '%s' "$_v" > "$SHARED_TOKEN"; chmod 600 "$SHARED_TOKEN"; } 2>/dev/null
+  return 0
+}
+
 if [ "${TINDA_IN_PROOT:-0}" != "1" ] && [ -z "${TINDA_RF:-}" ]; then
   log info "web: 启动方式 proot（DSH App runtime rootfs）"
   exec sh "$MODDIR/bin/proot-run.sh" /bin/sh "$MODDIR/bin/run-web.sh"
 fi
 
+# 宿主侧先生成/读取 token，再进 proot：guest 只认这个值，不自己另造一份。
+_ensure_token || exit 78
+
+# 进到 guest：宿主已经通过 WEB_TOKEN 给过值，直接沿用；没有（例如宿主直跑）才现场准备。
+[ -n "${WEB_TOKEN:-}" ] || _ensure_token || exit 78
+
 NODE=/usr/local/bin/node
 [ -x "$NODE" ] || NODE=$(command -v node)
 [ -n "$NODE" ] || { log error "受限 rootfs 里没有 node（缺 /usr/local/bin/node）"; exit 78; }
 
-TOKEN_FILE="$DATA/secrets/web.token"
-# token 必须「一处写、处处读」。真机上 proot 内外的 $DATA 可能同名不同物
-# （2026-11-20 实测：宿主那份指纹 5c082429、网关读到的是 7ec1ded2），于是 action.sh 印出来的
-# token 在网关上永远对不上，页面就永远卡在验证。共享存储是两边都看得见的唯一位置，
-# 所以让 token 以它为「共同真相」：有就先用它并同步回 $DATA，没有就把 $DATA 的写过去。
-SHARED_TOKEN="$(dirname "$MIRROR_DIR")/web.token"
-_sync_shared_token() {
-  _v=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\r\n')
-  [ -n "$_v" ] || return 0
-  printf '%s' "$_v" > "$SHARED_TOKEN" 2>/dev/null && chmod 600 "$SHARED_TOKEN" 2>/dev/null
-  return 0
-}
-if [ -s "$SHARED_TOKEN" ]; then
-  _shared=$(cat "$SHARED_TOKEN" 2>/dev/null | tr -d '\r\n')
-  _cur=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\r\n')
-  if [ -n "$_shared" ] && [ "$_shared" != "$_cur" ]; then
-    umask 077
-    if printf '%s' "$_shared" > "$TOKEN_FILE" 2>/dev/null; then
-      log info "token 以共享存储为准，已同步到加密数据目录"
-    else
-      log warn "同步 token 到 \$DATA 失败，网关会直接用共享存储那份"
-    fi
-  fi
-fi
-# 空文件也算没有：网关会拒绝空 token 启动，所以这里必须把空文件补成真 token。
-if [ ! -s "$TOKEN_FILE" ]; then
-  _tmp="$TOKEN_FILE.tmp.$$"
-  umask 077
-  head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$_tmp" || { log error "生成 web.token 失败"; rm -f "$_tmp"; exit 78; }
-  mv -f "$_tmp" "$TOKEN_FILE" || { rm -f "$_tmp"; log error "写入 web.token 失败"; exit 78; }
-  chmod 600 "$TOKEN_FILE" 2>/dev/null
-  log info "已生成新的 web.token（32 位十六进制）"
-fi
-# 让宿主侧的 action.sh / 模块页看到同一份（proot 里 $DATA 可能不是同一个目录）。
-_sync_shared_token
+# WEB_TOKEN 由上面的 _ensure_token 设置并导出；这里不再从 $DATA 重读，避免覆盖成 guest 本地那份。
 
 WEB_LAN_IP=$(conf_get WEB_LAN_IP 192.168.1.3)
 CERT="$DATA/secrets/tls.crt"; KEY="$DATA/secrets/tls.key"
@@ -106,7 +107,7 @@ export TINDA_MIRROR_LOG="${MIRROR_DIR:-/sdcard/Bridge/Logs}/web-console.log"
 # （/data/adb/tinda-bot 是指向 /var/tinda 的符号链接，模块目录是指向 /opt/tinda-bot 的）。
 export TINDA_DATA="$DATA"
 export TINDA_MODDIR="$MODDIR"
-export WEB_TOKEN="$(cat "$TOKEN_FILE")"
+# （token 已在 _ensure_token 里导出）
 export WEB_BIND="$(conf_get WEB_BIND 0.0.0.0)"
 export WEB_PORT="$(conf_get WEB_PORT 8443)"
 export WEB_REDIRECT_PORT="$(conf_get WEB_REDIRECT_PORT 8088)"

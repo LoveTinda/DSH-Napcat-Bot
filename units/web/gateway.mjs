@@ -85,6 +85,9 @@ let tokenStamp = '';
  * 副作用：可能更新 TOKEN/TOKEN_FILE 并打一行日志。
  */
 function currentToken() {
+  // 宿主通过 WEB_TOKEN 传进来的值是权威：proot 里看到的 /data 可能是另一份内容，
+  // 让文件反过来覆盖它，只会把「对不上的 token」重新引进来。
+  if (String(process.env.WEB_TOKEN || '').trim()) return TOKEN;
   const picked = pickTokenFile();
   if (!picked.token) return TOKEN;
   const stamp = picked.file + '|' + picked.token;

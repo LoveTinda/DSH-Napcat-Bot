@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## v0.6.6
+
+日志又前进了一步，这次是**分叉本身**被抓住了：
+
+```text
+[warn] 白名单为空，且认不出 NapCat 账号：请在 /data/adb/tinda-bot/etc/bridge-policy.json 里填 allowUsers
+[warn] 跳过不存在的 bind：/data/adb/tinda-bot/etc/bridge-policy.json:/tmp/tinda-policy.json
+```
+
+我在同一条路径上写好的策略，桥接进程说「不存在」。**宿主和 proot 里的 `/data` 是两份内容**
+（同路径不同物），所以我改的那份只有我看得见。同理，`/sdcard/Bridge/web.token` 也是 guest 本地副本。
+
+### 改动（明确谁是权威 + 只走两边都看得见的位置）
+
+- **token 权威 = 宿主**：`run-web.sh` 在进 proot 之前生成/读取 token，用 `WEB_TOKEN` 传进 guest；
+  网关遇到 `WEB_TOKEN` 就固定用它，不再被 guest 里的旧文件覆盖。共享存储那份只用于「贴给人看」。
+- **策略走共享存储**：`run-app-proot.sh` 优先 bind `/sdcard/Bridge/bridge-policy.json`
+  （已按你的 QQ `3876238785` 写好），`$DATA` 那份只在缺失时当作来源；生成的策略同时写两份。
+- **账号探测换成可移植写法**：原来用 `sed 's/…\{5,12\}…/'` 从 `napcat_<QQ>.json` 里取号，
+  toybox/busybox 的 sed 对区间支持不一致，真机上就是这里静默失败 → 现在用 shell 展开。
+- 版本：v0.6.6 / versionCode 81
+
 ## v0.6.5
 
 桥接器这次自己把原因写在日志里了（`/sdcard/Bridge/Logs/supervisor.log`）：
