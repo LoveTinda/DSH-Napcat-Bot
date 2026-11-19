@@ -98,6 +98,22 @@ conf_sync() {
   return 0
 }
 
+# 目的：把常驻进程挪出「应用 cgroup」并降低 OOM 权重。
+#       为什么：Android 12+ 的幽灵进程清理/冻结是按进程 cgroup 下手的，从管理器（一个应用）
+#       里起的守护进程会被整组 SIGKILL 或冻结。冻结的表现就是——端口能连、没有响应、
+#       日志停住、进程却还活着（真机上反复出现，误判成 proot 卡死）。
+# 输入：pid。输出：无。失败：返回 1（调用方决定是否记日志），不抛错。
+# 副作用：写 /proc/<pid>/oom_score_adj、/sys/fs/cgroup/cgroup.procs。
+protect_pid() {
+  [ -n "$1" ] || return 1
+  echo -1000 > "/proc/$1/oom_score_adj" 2>/dev/null ||     echo -900 > "/proc/$1/oom_score_adj" 2>/dev/null
+  for _pcg in /sys/fs/cgroup/cgroup.procs; do
+    [ -w "$_pcg" ] || continue
+    echo "$1" > "$_pcg" 2>/dev/null && return 0
+  done
+  return 1
+}
+
 ensure_dirs() {
   umask 077
   mkdir -p "$DATA/state" "$DATA/logs" "$DATA/run" "$DATA/secrets" "$DATA/etc"

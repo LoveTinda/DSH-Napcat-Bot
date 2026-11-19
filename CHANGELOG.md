@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## v0.5.5
+
+这次是**规范问题**，不是 proot。查到 Termux 的已知问题（termux/termux-app#5078）和
+agnostic-apollo 的 Android 文档：Android 12+ 有 **幽灵进程清理（Phantom Process Killer）**
+和**缓存应用冻结**，它们是按**进程 cgroup** 下手的，日志长这样：
+
+```text
+I ActivityManager: Killing PhantomProcessRecord {...}: Trimming phantom processes
+I libprocessgroup: Successfully killed process cgroup uid 10147 pid 5683 in 0ms
+```
+
+从管理器（一个应用）里点「操作」起的守护进程，就是那个应用的幽灵子进程。管理器退到后台，
+它可能被**冻结**（SIGSTOP）或**整组 SIGKILL**。冻结的样子和我们一直以为的「proot 卡死」
+完全一样：端口能连、不回字节、日志停在半句话、进程还活着、心跳停了。
+
+改动：
+
+- `bin/lib.sh` 新增 `protect_pid()`：`oom_score_adj=-1000`（退 `-900`）+ 把 pid 写进
+  `/sys/fs/cgroup/cgroup.procs`，尽量脱离应用 cgroup
+- `unit.sh`：supervisor 启动时先给自己上保护，每次 spawn 的子进程再各保护一次
+  （cgroup 变更不会被子进程继承，`oom_score_adj` 会）
+- 新增 ADR-0014，把这条 Android 平台的约束写下来，并说明「开机由 service.sh 拉起」才是
+  推荐路径（那是 magiskd 的子进程，不经过应用 cgroup）
+- 版本：v0.5.5 / versionCode 74
+- 验证：`sh -n` 通过；门禁 0 FAIL
+
 ## v0.5.4
 
 「还是一样」这次的原因很具体，日志最后一行就是：

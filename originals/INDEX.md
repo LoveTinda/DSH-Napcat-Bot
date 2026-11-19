@@ -215,3 +215,8 @@
 - 目录：originals/20261119-195539-v0.5.4-self-heal
 - 清单：SHA256SUMS
 
+## 20261119-200313 — v0.5.5-phantom-process
+- 文件数：144
+- 目录：originals/20261119-200313-v0.5.5-phantom-process
+- 清单：SHA256SUMS
+

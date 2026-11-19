@@ -282,12 +282,18 @@ do_start() {
   _ver=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)
   log info "$NAME 代码：${_ver:-unknown} @ $MODDIR"
   (
+    # 先给自己上保护：Android 会把「应用起的守护进程」当幽灵进程整组清理或冻结。
+    # 冻结比杀更恶心——进程还在、端口能连、但一个字节都不回。
+    protect_pid $$ || log warn "$NAME 没能脱离应用 cgroup（幽灵进程清理可能冻结这个单元）"
     fails=0
     while :; do
       [ -f "$PID_FILE.stop" ] && break
       spawn >> "$LOG_FILE" 2>&1 &
-      echo $! > "$PID_FILE.child"
-      wait $!
+      _child_pid=$!
+      echo "$_child_pid" > "$PID_FILE.child"
+      # 子进程不继承 cgroup 变更，必须各自挪一次；oom_score_adj 会继承。
+      protect_pid "$_child_pid" 2>/dev/null
+      wait "$_child_pid"
       rc=$?
       [ -f "$PID_FILE.stop" ] && break
       # 78 是「环境不成立」：缺 proot/rootfs/node、参数拼不起来、bind 源不存在。
