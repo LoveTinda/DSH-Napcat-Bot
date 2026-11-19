@@ -220,3 +220,8 @@
 - 目录：originals/20261119-200313-v0.5.5-phantom-process
 - 清单：SHA256SUMS
 
+## 20261119-200823 — v0.6.0-hot-install
+- 文件数：146
+- 目录：originals/20261119-200823-v0.6.0-hot-install
+- 清单：SHA256SUMS
+

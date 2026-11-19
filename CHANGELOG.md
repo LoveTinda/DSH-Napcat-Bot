@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## v0.6.0
+
+按 KernelSU / SukiSU 的**模块开发规格**重新对了一遍，发现我们一直在绕规格自己造轮子。
+规格里有官方的「热安装」（Hot install）：
+
+```sh
+export MODULE_HOT_INSTALL_REQUEST=true       # 这个模块可以立即生效
+export MODULE_HOT_RUN_SCRIPT=hotinstall.sh   # 安装器跑完后要执行的脚本
+```
+
+规格写得很清楚：
+
+- 管理器会把 `modules_update/<id>` 换成 `modules/<id>`，然后**以 boot 脚本同样的方式**
+  执行那个脚本（全局 mount namespace、cwd=脚本目录、stdin=/dev/null、忽略 SIGPIPE、
+  **最多等 30 秒**，长期服务要在后台起）
+- 立即生效：模块文件、WebUI、`action.sh`、`module.prop`；下次开机生效：`system/`、
+  `system.prop`、`initrc`、`service.sh` 等
+- **「旧版本不会帮你停」**，有守护进程的模块要自己在那个脚本里先停旧再起新
+- 能力探测变量：`KSU_HAS_HOT_INSTALL`
+
+我们 v0.4.9 起的「`cp -a` 同步运行目录」就是在绕这条规格。
+
+改动：
+
+- `customize.sh`：支持热安装时请求并就绪 `hotinstall.sh`；老管理器退回原做法
+- 新增 `hotinstall.sh`：`unit.sh stop web` → 后台 `unit.sh start web` → 打印版本，
+  严格符合「先停旧、后台起、别让安装器等」三条
+- 门禁加上三项检查（文件存在 / 可执行位 / customize.sh 里两个变量），防止退回非规格做法
+- 新增 ADR-0015 记录规格原文与取舍
+- 版本：v0.6.0 / versionCode 75
+- 验证：`sh -n` 通过；门禁 0 FAIL
+
 ## v0.5.5
 
 这次是**规范问题**，不是 proot。查到 Termux 的已知问题（termux/termux-app#5078）和

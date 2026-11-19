@@ -74,6 +74,11 @@ check_root() {
   [ -x "$root/bin/proot-run.sh" ] || fail "bin/proot-run.sh 没有可执行位"
   grep -q 'proot-run.sh' "$root/bin/run-web.sh" || fail "run-web.sh 没接 proot 启动器（没 node 的机器上 web 起不来）"
   grep -q 'proot-run.sh' "$root/bin/run-app-proot.sh" || fail "run-app-proot.sh 没接 proot 启动器（bridge 会另写一份参数）"
+  # 热安装（KernelSU/SukiSU 规格）：模块有守护进程，安装后必须由 hotinstall.sh 停旧起新。
+  [ -f "$root/hotinstall.sh" ] || fail "缺 hotinstall.sh（热安装后停旧起新）"
+  [ -x "$root/hotinstall.sh" ] || fail "hotinstall.sh 没有可执行位"
+  grep -q 'MODULE_HOT_INSTALL_REQUEST' "$root/customize.sh" || fail "customize.sh 没请求热安装（更新要重启才生效）"
+  grep -q 'MODULE_HOT_RUN_SCRIPT' "$root/customize.sh" || fail "customize.sh 没设置 MODULE_HOT_RUN_SCRIPT"
   [ -f "$root/webroot/index.html" ] || fail "缺 webroot/index.html（KernelSU/APatch 模块页的「打开」按钮）"
   [ -f "$root/units/web/ui/module.html" ] || fail "缺 units/web/ui/module.html（模块信息页）"
   grep -q '/module/data.json' "$root/units/web/gateway.mjs" || fail "网关没有 /module/ 路由"
