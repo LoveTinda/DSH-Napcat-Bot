@@ -10,35 +10,28 @@ fi
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 
-NODE="$MODDIR/bin/node"; [ -x "$NODE" ] || NODE=$(command -v node)
+# 业务进程一律不进宿主：宿主 root 域只留 unit.sh/supervisor，web 和 bridge 一样在
+# DSH App 的 proot 里跑。找不到 proot/rootfs/node 就 78，**不回退宿主 node**。
+# 理由：宿主是 Android root 域，跑 node 意味着把整片 /data 和 root 权限暴露给业务代码；
+# proot 至少只给它 bind 进来的目录。
+if [ "${TINDA_IN_PROOT:-0}" != "1" ]; then
+  . "$MODDIR/bin/lib-proot.sh"
+  if ! proot_detect; then
+    log error "找不到可用的 DSH proot（PROOT_BIN=$PROOT_BIN，PROOT_ROOTFS=$PROOT_ROOTFS，包=$PROOT_PKG）"
+    log error "不回退宿主 exec：web 只允许在 proot 里跑。装好 DSH App 或改 PROOT_* 后再试。"
+    exit 78
+  fi
+  log info "web 运行时：DSH proot（$PROOT_ROOTFS）"
+  exec "$PROOT_BIN" --kill-on-exit -0 --rootfs="$PROOT_ROOTFS" --cwd=/root \
+    -b /dev -b /proc -b /sys -b /system -b /apex \
+    -b "$MODDIR:$MODDIR" -b "$DATA:$DATA" \
+    /usr/bin/env TINDA_IN_PROOT=1 PATH=/usr/local/bin:/usr/bin:/bin \
+    /bin/sh "$MODDIR/bin/run-web.sh"
+fi
 
-# 运行时选择：默认 proot 优先（和 bridge 一致，宿主不需要装 node；rootfs 里有 node+openssl）。
-#   WEB_RUNTIME=auto  → 能探测到 DSH proot 就用 proot，否则退回宿主 node（默认）
-#   WEB_RUNTIME=proot → 必须用 proot，探测不到就 78
-#   WEB_RUNTIME=host  → 只用宿主 node
-WEB_RUNTIME=$(conf_get WEB_RUNTIME auto)
-case "$WEB_RUNTIME" in
-  host) : ;;
-  proot|auto|*)
-    if [ "${TINDA_IN_PROOT:-0}" != "1" ]; then
-      . "$MODDIR/bin/lib-proot.sh"
-      if proot_detect; then
-        log info "web 运行时：DSH proot（$PROOT_ROOTFS）"
-        exec "$PROOT_BIN" --kill-on-exit -0 --rootfs="$PROOT_ROOTFS" --cwd=/root \
-          -b /dev -b /proc -b /sys -b /system -b /apex \
-          -b "$MODDIR:$MODDIR" -b "$DATA:$DATA" \
-          /usr/bin/env TINDA_IN_PROOT=1 PATH=/usr/local/bin:/usr/bin:/bin \
-          /bin/sh "$MODDIR/bin/run-web.sh"
-      fi
-      if [ "$WEB_RUNTIME" = "proot" ]; then
-        log error "WEB_RUNTIME=proot，但探测不到 DSH proot（见 PROOT_* 配置）"
-        exit 78
-      fi
-      log warn "探测不到 DSH proot，退回宿主 node"
-    fi
-    ;;
-esac
-[ -n "$NODE" ] || { log error "缺 node：宿主 PATH 没有，DSH proot 也不可用（见 PROOT_*）"; exit 78; }
+NODE=/usr/local/bin/node
+[ -x "$NODE" ] || NODE=$(command -v node)
+[ -n "$NODE" ] || { log error "proot 里没有 node（rootfs 缺 /usr/local/bin/node）"; exit 78; }
 
 TOKEN_FILE="$DATA/secrets/web.token"
 # 空文件也算没有：网关会拒绝空 token 启动，所以这里必须把空文件补成真 token。

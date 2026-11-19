@@ -86,6 +86,11 @@ check_root() {
   grep -q 'mount -o bind /data/adb' "$root/bin/unit.sh" && fail "unit.sh 仍在 bind /data/adb（递归挂载）"
   grep -q '^TYPE=exec' "$root/units/napcat/unit.conf" || fail "napcat 必须是 TYPE=exec（Android QQ 不能进 glibc rootfs）"
   grep -q '^TYPE=proot' "$root/units/bridge/unit.conf" || fail "bridge 必须是 TYPE=proot（独立 node，不 chroot、不 mount）"
+  # web 也只允许 proot：宿主是 Android root 域，不能跑业务 node。
+  grep -q 'TINDA_IN_PROOT' "$root/bin/run-web.sh" || fail "run-web.sh 没有 proot 重入保护"
+  grep -q '不回退宿主' "$root/bin/run-web.sh" || fail "run-web.sh 可能回退宿主 exec（不允许）"
+  grep -qE 'command -v node' "$root/bin/run-web.sh" && grep -q 'WEB_RUNTIME' "$root/bin/run-web.sh" \
+    && fail "run-web.sh 仍有宿主 node / WEB_RUNTIME 分支"
   [ -f "$root/app/src/index.js" ] || fail "缺单应用入口 app/src/index.js"
   grep -q 'MODPATH' "$root/customize.sh" || note "customize.sh 没用到 MODPATH（安装期路径可能取错）"
 
@@ -93,7 +98,7 @@ check_root() {
   if [ -x "$root/bin/node" ]; then
     ok "自带 bin/node（$("$root/bin/node" -v 2>/dev/null || echo 版本未知)）"
   else
-    note "没有自带 bin/node：bridge 用 DSH rootfs 的 node；web/宿主单元仍要求 PATH 里有 node（见 S-4）"
+    note "没有自带 bin/node：bridge 与 web 都用 DSH rootfs 的 node，宿主不再需要 node"
   fi
   [ "$bad" -eq 0 ] && ok "模块结构可刷（$root）"
 }

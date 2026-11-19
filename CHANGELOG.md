@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v0.4.0
+
+- **业务进程只跑 proot，删掉宿主回退**：宿主是 Android root 域，在那儿跑 node 等于把
+  `/data` 和 root 权限交给会被 QQ 消息触发的代码。现在 `run-web.sh` 探测不到 proot/rootfs
+  就 `exit 78`，错误里写明 `PROOT_BIN`/`PROOT_ROOTFS`/包名，**不退回宿主 node**
+- 删除 `WEB_RUNTIME`（没有 host / auto 档）；宿主侧只剩 `unit.sh`/supervisor 这类生命周期脚本
+- `check-module` 固化：`run-web.sh` 必须有 `TINDA_IN_PROOT` 重入保护与「不回退宿主」，
+  且不能再出现 `command -v node` + `WEB_RUNTIME` 组合
+- 新增 [ADR-0012](docs/adr/0012-业务进程只跑proot.md)，收紧 ADR-0010
+- 版本：v0.4.0 / versionCode 59
+- 验证：无 proot 环境下 `run-web.sh` 290ms 内以 78 退出并打印两个变量；守卫 0 FAIL / 1 warn
+
 ## v0.3.9
 
 - **web 默认也走 proot**：和 bridge 统一运行时——有 DSH App 的 `libproot.so` + runtime rootfs
