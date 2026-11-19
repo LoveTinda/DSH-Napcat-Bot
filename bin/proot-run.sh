@@ -141,11 +141,11 @@ _tailof() { printf '%s' "$1" | tail -n 12 | tr '\n' ' ' | cut -c1-900; }
 # 不认就 1 秒 × 20（20 秒）。超时就 kill，绝不允许「悄悄挂住」。
 if sleep 0.1 2>/dev/null; then _PROBE_STEP=0.1; _PROBE_LIMIT=100; else _PROBE_STEP=1; _PROBE_LIMIT=20; fi
 
-# 探针：跑一条 /bin/sh -c，成功会打印 PROOT_OK；失败把 proot 的原始输出（带 --debug=1
-# 的调试行）带回来，好知道它停在哪一步。
+# 探针：跑一条 /bin/sh -c，成功会打印 PROOT_OK；失败/卡住把 proot 的原始输出带回来。
 _probe() {
   set -f
-  set -- $(_proot_flags "$1" nokill) --debug=1 /bin/sh -c 'echo PROOT_OK'
+  # 注意：这份 proot 不认 --debug=1（真机日志：unknown option '--debug=1'），别再加。
+  set -- $(_proot_flags "$1" nokill) /bin/sh -c 'echo PROOT_OK'
   set +f
   _pout="$DATA/run/proot.probe.$$"
   : > "$_pout" 2>/dev/null
@@ -164,6 +164,60 @@ _probe() {
   wait "$_pp" 2>/dev/null
   cat "$_pout" 2>/dev/null
   rm -f "$_pout" 2>/dev/null
+}
+
+# 单组诊断：$1=名字 $2=秒数上限，其余=要试的 proot 参数。
+# 卡住就立刻停止后续分组（后面的分组都包含同样的前缀，只会一起卡）。
+_stage_hang=0
+_stage() {
+  _sname=$1; _slim=$2; shift 2
+  _sout="$DATA/run/proot.stage.$$"
+  : > "$_sout" 2>/dev/null
+  LD_LIBRARY_PATH="$_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$PROOT_BIN" \
+    --rootfs="$PROOT_ROOTFS" --cwd=/root "$@" /bin/sh -c 'echo STAGE_OK' >> "$_sout" 2>&1 &
+  _spid=$!
+  _si=0
+  while kill -0 "$_spid" 2>/dev/null; do
+    _si=$((_si+1))
+    [ "$_si" -ge "$((_slim * 10))" ] && break
+    sleep 0.1 2>/dev/null || { sleep 1; _si=$((_si+10)); }
+  done
+  if kill -0 "$_spid" 2>/dev/null; then
+    kill -9 "$_spid" 2>/dev/null
+    wait "$_spid" 2>/dev/null
+    log warn "proot 分级 $_sname：${_slim}s 内没退出（卡住）"
+    _stage_hang=1
+  else
+    wait "$_spid" 2>/dev/null
+    _src=$?
+    if grep -q STAGE_OK "$_sout" 2>/dev/null; then
+      log info "proot 分级 $_sname：通过"
+    else
+      log warn "proot 分级 $_sname：失败 rc=$_src $(_tailof "$(cat "$_sout" 2>/dev/null)")"
+    fi
+  fi
+  rm -f "$_sout" 2>/dev/null
+}
+
+# 探针没通过时用最小参数逐组加，定位是扩展选项、还是哪一条 bind 把它卡住的。
+# 每组 6 秒；一旦某组卡住就停（后续分组含同样前缀，只会一起卡）。
+_bisect() {
+  log warn "proot 探针没通过，开始分级诊断（每组 6 秒）"
+  _stage 1-裸rootfs 6 -0
+  [ "$_stage_hang" = 1 ] && return 0
+  _stage 2-加扩展选项 6 -0 --link2symlink --sysvipc -L
+  [ "$_stage_hang" = 1 ] && return 0
+  _stage 3-加系统bind 6 -0 --link2symlink --sysvipc -L \
+    -b /dev -b /proc -b /sys -b /system -b /apex
+  [ "$_stage_hang" = 1 ] && return 0
+  _stage 4-加fd-bind 6 -0 --link2symlink --sysvipc -L \
+    -b /dev -b /proc -b /sys -b /system -b /apex \
+    -b /proc/self/fd:/dev/fd -b /proc/self/fd/0:/dev/stdin \
+    -b /proc/self/fd/1:/dev/stdout -b /proc/self/fd/2:/dev/stderr
+  [ "$_stage_hang" = 1 ] && return 0
+  _stage 5-加模块bind 6 -0 --link2symlink --sysvipc -L \
+    -b /dev -b /proc -b /sys -b /system -b /apex \
+    -b "$MODDIR:$MODDIR" -b "$DATA:$DATA"
 }
 
 # 被信号打断时也要留一行，否则日志会停在半句话上，看不出是挂住还是被杀。
@@ -203,6 +257,7 @@ if [ -z "$_mode" ]; then
         *)
           log error "proot 起不来，两种参数都试过：$(_tailof "$_out")"
           log error "proot=$PROOT_BIN rootfs=$PROOT_ROOTFS"
+          _bisect
           exit 78 ;;
       esac ;;
   esac

@@ -195,3 +195,8 @@
 - 目录：originals/20261119-135743-v0.5.0-no-kill-on-exit
 - 清单：SHA256SUMS
 
+## 20261119-193916 — v0.5.1-bisect
+- 文件数：143
+- 目录：originals/20261119-193916-v0.5.1-bisect
+- 清单：SHA256SUMS
+
