@@ -36,6 +36,16 @@ while [ "$_i" -lt 60 ]; do
   sleep 0.5 2>/dev/null || sleep 1
 done
 
+# NapCat 是外部的宿主直装进程（QQ + 注入），只有 root 能拉。它不起来，桥接器就没有消息来源。
+if [ -d "$MODDIR/units/napcat" ]; then
+  if command -v setsid >/dev/null 2>&1; then
+    ( MODDIR="$MODDIR" DATA="$DATA" nohup setsid sh "$MODDIR/bin/unit.sh" start napcat >/dev/null 2>&1 & )
+  else
+    ( MODDIR="$MODDIR" DATA="$DATA" nohup sh "$MODDIR/bin/unit.sh" start napcat >/dev/null 2>&1 & )
+  fi
+  echo "NapCat：已发起启动（要等 QQ 起来、3001 探活成功，面板那个点才会变绿）"
+fi
+
 # 桥接器才是面板里真正的内容。只起 web 的话，面板永远显示「这个面板还没起来」。
 if [ -d "$MODDIR/units/bridge" ]; then
   if command -v setsid >/dev/null 2>&1; then

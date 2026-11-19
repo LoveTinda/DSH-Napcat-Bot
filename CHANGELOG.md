@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## v0.6.5
+
+桥接器这次自己把原因写在日志里了（`/sdcard/Bridge/Logs/supervisor.log`）：
+
+```text
+ERROR [main] 访问策略配置不安全，拒绝启动：
+- policy.allowUsers 为空：私聊默认拒绝。请填至少一个允许的 QQ 号…
+配置来自 /tmp/tinda-app.json
+```
+
+三件事叠在一起，才出现「桥接器和 NapCat 一个都没起来」：
+
+1. `/tmp/tinda-app.json` 是**空文件**。它是 `$CONF`（`$DATA/etc/app.json`）的 bind 目标，而那份配置
+   从来没生成成功；脚本先 `touch` 建了空文件，应用读到的就是 `{}`。
+2. 即使生成成功，`bridge-policy.json` 里仍是占位值 `"123456"`，白名单等于没人 → 按设计 fail-closed。
+3. NapCat 根本没人请求启动（动作按钮只起 web / bridge）。
+
+### 改动
+
+- 新增 `bin/app-boot`（在 guest 里执行）：每次启动用 `config.example.json` + 策略**重新生成**
+  `/tmp/tinda-app.json`，再 exec 业务。不再假设「宿主 $CONF 与 guest /tmp 是同一个文件」。
+- `run-app-proot.sh`：宿主侧只做两件事——确保策略文件存在，把模板/策略显式 bind 进 guest。
+- **策略兜底**：`allowUsers` 为空或仍是占位 `123456` 时，按 NapCat 登录账号
+  （`/opt/napcat/config/napcat_<QQ>.json`）生成 `{"allowUsers":[QQ],"ownerUsers":[QQ]}`，
+  只应答你自己；要放开就改那个文件。本次真机已按 QQ `3876238785` 写好，原文件留了 `.bak`。
+- 「操作」按钮再补一步：**连 NapCat 一起拉**（外部宿主直装进程，只有 root 能起）。
+- 版本：v0.6.5 / versionCode 80
+
+### 验证
+
+`sh -n` / `node --check` 通过；`app-config.mjs` 用真机策略跑过，生成结果里
+`policy.allowUsers=["3876238785"]`、`onebot=forward-ws ws://127.0.0.1:3001`。
+
 ## v0.6.4
 
 v0.6.3 上线后，共享存储里的**访问日志第一次把真实请求记了下来**，一看就清楚：
