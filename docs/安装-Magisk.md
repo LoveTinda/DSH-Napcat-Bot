@@ -114,6 +114,18 @@ KernelSU 系列不保证执行 `customize.sh`（那是 Magisk 的安装钩子）
 
 它只起 `web`，不动 `bridge`/`napcat`；重复点也不会起第二个。
 
+### 日志在哪
+
+| 位置 | 内容 |
+| --- | --- |
+| `/data/adb/tinda-bot/logs/` | 原始日志（supervisor / web / bridge / napcat），需要 root |
+| `/sdcard/Bridge/Logs/supervisor.log` | 实时镜像（已脱敏），超过 4MB 轮转 `.1` |
+| `/sdcard/Bridge/Logs/<unit>.log` | 该单元**启动失败**时整份复制过来（已脱敏） |
+| `/sdcard/Bridge/Logs/export/` | `bin/export-logs.sh` 或点「操作」时全量导出 |
+
+共享存储上的内容都过 `redact()`（token / 手机号替换成 `***`），但不要整份外发——里面仍有
+QQ 号、群号、路径。
+
 ### 启动耗时（v0.3.4 实测）
 
 | 动作 | 实测 | 说明 |

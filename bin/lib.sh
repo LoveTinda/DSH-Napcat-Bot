@@ -37,6 +37,21 @@ redact() {
     -e 's/[0-9]{11,}/***PHONE***/g'
 }
 
+# 日志镜像：/sdcard/Bridge/Logs/ 是 DSH App 能直接读的位置，出问题不用 root 也能看。
+# 只镜像已经过 redact() 的行；单文件超过 MIRROR_MAX_MB 就轮转一份 .1。
+MIRROR_DIR=${MIRROR_DIR:-/sdcard/Bridge/Logs}
+MIRROR_MAX_MB=${MIRROR_MAX_MB:-4}
+
+mirror_line() {
+  [ -d "$MIRROR_DIR" ] || mkdir -p "$MIRROR_DIR" 2>/dev/null || return 0
+  _mf="$MIRROR_DIR/$1"
+  _msz=$(stat -c %s "$_mf" 2>/dev/null || echo 0)
+  if [ "${_msz:-0}" -gt $((MIRROR_MAX_MB * 1024 * 1024)) ]; then
+    mv -f "$_mf" "$_mf.1" 2>/dev/null
+  fi
+  printf '%s\n' "$2" >> "$_mf" 2>/dev/null
+}
+
 log() {
   _lvl="$1"; shift
   _ts=$(date '+%Y-%m-%dT%H:%M:%S')
@@ -45,6 +60,7 @@ log() {
   _line="$_ts [$_lvl] $*"
   _line=$(printf '%s' "$_line" | redact)
   printf '%s\n' "$_line" >> "$DATA/logs/supervisor.log" 2>/dev/null
+  mirror_line supervisor.log "$_line"
   printf '%s\n' "$_line"
 }
 

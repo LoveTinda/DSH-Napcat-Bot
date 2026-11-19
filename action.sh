@@ -32,6 +32,8 @@ if [ -n "$TOKEN" ]; then
 else
   echo "还没生成 token：先看 $DATA/logs/web.log"
 fi
+# 顺手把日志导一份到共享存储，出问题不用 root 也能看
+sh "$MODDIR/bin/export-logs.sh" 2>/dev/null
 echo "状态：$(sh "$MODDIR/bin/unit.sh" status web 2>&1 | tail -1)"
 echo "日志（最后 5 行）："
 tail -5 "$DATA/logs/web.log" 2>/dev/null

@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## v0.4.3
+
+- **日志镜像到共享存储**：`bin/lib.sh` 的 `log()` 在写 `$DATA/logs/supervisor.log` 的同时，
+  把同一行（已脱敏）追加到 `/sdcard/Bridge/Logs/supervisor.log`，超过 4MB 轮转一份 `.1`；
+  DSH App 没有 root 也能直接读，排查不用再截图
+- **启动失败自动带日志**：`unit.sh` 在「未确认运行」时把单元日志尾部 30 行写进 supervisor
+  （因此也会出现在共享存储），并把整份 `<unit>.log` 脱敏复制到
+  `/sdcard/Bridge/Logs/<unit>.log`——chroot 的「挂模块代码失败」这类只写在单元日志里的原因，
+  现在一眼能看到
+- 新增 `bin/export-logs.sh`：把 `$DATA/logs/*.log` 全部脱敏导出到
+  `/sdcard/Bridge/Logs/export/`；`action.sh` 每次点「操作」也会顺带导出
+- **模块代码挂载改为三级退让**：真机日志 `[web] 挂模块代码失败` 说明内核不允许对 bind
+  再做 `ro` remount。现在依次尝试 `ro,nosuid,nodev,noexec` → `nosuid,nodev,noexec` →
+  普通 bind，前两级降级都会打警告；只有 bind 本身失败才 78
+- 版本：v0.4.3 / versionCode 62
+- 验证：`log` 镜像写入实测；`export-logs.sh` 导出 4 个日志；共享存储只落脱敏内容
+
 ## v0.4.2
 
 - **模块管理器里直接更新**：`module.prop` 增加 `updateJson`，指向仓库里的 `update.json`；

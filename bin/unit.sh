@@ -186,8 +186,17 @@ spawn_chroot() {
         echo "[$name] 警告：/sys 只读挂载失败，已跳过（业务不依赖 /sys）" >&2
       fi
       # 不挂 /sdcard：桥接/web 不需要；少一个可写外部面。
-      bind_mount "$mod" "$rf/opt/tinda-bot" "ro,nosuid,nodev,noexec" || {
-        echo "[$name] 挂模块代码失败" >&2; exit 78; }
+      # 模块代码要能读；ro 只是加分项。有些内核拒绝给 bind 再 remount ro（真机日志
+      # 「挂模块代码失败」就是这个），依次退让：ro → 非 ro 的加固 → 普通 bind，最后才 78。
+      if bind_mount "$mod" "$rf/opt/tinda-bot" "ro,nosuid,nodev,noexec"; then
+        :
+      elif bind_mount "$mod" "$rf/opt/tinda-bot" "nosuid,nodev,noexec"; then
+        echo "[$name] 警告：模块代码没挂成只读（内核拒绝 ro remount），已用 nosuid,nodev,noexec" >&2
+      elif mount -o bind "$mod" "$rf/opt/tinda-bot" 2>/dev/null; then
+        echo "[$name] 警告：模块代码只能普通 bind（内核拒绝 remount），已记录" >&2
+      else
+        echo "[$name] 挂模块代码失败（bind 本身就不成功）" >&2; exit 78
+      fi
 
       # 状态只挂目录，不挂 /data/adb 祖先；这样不会出现 /data/adb → 自己子目录的递归。
       for d in etc state logs run secrets; do
@@ -262,7 +271,19 @@ do_start() {
     _i=$((_i + 1))
     sleep 0.1 2>/dev/null || { sleep 1; break; }
   done
-  running && log info "$NAME 已启动 pid=$(cat "$PID_FILE")" || log warn "$NAME 未确认运行，见 $LOG_FILE"
+  if running; then
+    log info "$NAME 已启动 pid=$(cat "$PID_FILE")"
+  else
+    log warn "$NAME 未确认运行，见 $LOG_FILE"
+    # 失败原因往往只在单元日志里（例如 chroot 的「挂模块代码失败」）。把尾部带回
+    # supervisor，log() 会把它镜像到 /sdcard/Bridge/Logs/，没有 root 也能看到。
+    tail -n 30 "$LOG_FILE" 2>/dev/null | while IFS= read -r _l; do
+      [ -n "$_l" ] && log warn "[$NAME] $_l"
+    done
+    # 整份单元日志也脱敏放一份到共享存储：DSH App 能直接读，不用 root 捞 /data/adb。
+    mkdir -p "${MIRROR_DIR:-/sdcard/Bridge/Logs}" 2>/dev/null
+    redact < "$LOG_FILE" > "${MIRROR_DIR:-/sdcard/Bridge/Logs}/$NAME.log" 2>/dev/null
+  fi
 }
 
 do_stop() {
