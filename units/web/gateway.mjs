@@ -49,6 +49,8 @@ const COOKIE = 'tinda';
 // 谁有内容用谁，并把「实际用了哪个」写进日志和 /__info，免得再靠猜。
 const TOKEN_FILES = [...new Set([
   process.env.WEB_TOKEN_FILE,
+  // 共享存储放最前：proot 内外的 $DATA 可能同名不同物，这一份两边都看得见。
+  '/sdcard/Bridge/web.token',
   '/data/adb/tinda-bot/secrets/web.token',
   process.env.TINDA_DATA ? path.join(process.env.TINDA_DATA, 'secrets', 'web.token') : '',
 ].filter(Boolean))];

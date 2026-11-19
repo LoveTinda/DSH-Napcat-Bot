@@ -42,6 +42,13 @@ else
   printf '\nAUTO_START=web\n' >> "$DATA/etc/tinda.conf" 2>/dev/null
   log "配置里没有 AUTO_START，已补默认值 web"
 fi
+# 老默认值只有 web：面板能开、里面三个面板全空，看起来就像「没生效」。
+# 一次性把「只写了 web」升级成 web,bridge（显式写了别的组合不动）。
+if [ "$_auto" = "web" ]; then
+  _auto="web,bridge"
+  sed -i 's/^AUTO_START=web$/AUTO_START=web,bridge/' "$DATA/etc/tinda.conf" 2>/dev/null
+  log "AUTO_START 从旧默认 web 升级为 web,bridge（桥接器也要起，面板才有内容）"
+fi
 case "$_auto" in
   ''|off|none|0)
     log "开机自启：关闭（AUTO_START 为空或 off）"

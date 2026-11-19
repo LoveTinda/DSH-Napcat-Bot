@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## v0.6.4
+
+v0.6.3 上线后，共享存储里的**访问日志第一次把真实请求记了下来**，一看就清楚：
+
+```text
+[web] GET /          200 2ms  from=192.168.1.3 ua=Mozilla/5.0 (X11; Linux x86_64)
+[web] GET /bridge/   502 4ms  from=192.168.1.3
+[web] NapCat 登录失败：ECONNREFUSED
+```
+
+首页 200、桥接面板 502、NapCat 连不上。也就是说：**网页本身能开**，打不开的是面板里的内容——
+`AUTO_START=web` 只起了网关，桥接器（6700）和 NapCat（6099）根本没起来。
+
+同时 `/__info` 把上一个悬案钉死了：
+
+```text
+网关读到：/data/adb/tinda-bot/secrets/web.token  指纹 7ec1ded2  mtime 2026-11-16T17:54Z
+宿主机上：/data/adb/tinda-bot/secrets/web.token  指纹 5c082429  mtime 2026-11-19 01:34
+```
+
+同一路径、两份内容——proot 内外的 `$DATA` 真的不是同一个目录，所以 `action.sh` 印的 token
+在网关那边永远不对。
+
+### 改动
+
+- **token 以共享存储为共同真相**：`/sdcard/Bridge/web.token`。`run-web.sh` 启动时以它为基准
+  同步到 `$DATA`（没有就写过去），网关、`action.sh`、模块页读的都是这一份。proot 再分家也不会分叉。
+  - 代价：token 落在共享存储（其他有存储权限的 App 可读）。对单机自用的局域网面板是必要取舍，
+    已在 ADR-0016 记录；行踪仍只在 `/data/adb` 和镜像日志里。
+- **「操作」按钮和热安装都顺手拉起桥接器**（原来只起 web，所以面板一直空）。
+- **就绪等待改看共享存储里的 console 日志**：以前盯宿主 `$DATA/logs/web.log`，跨命名空间永远等不到，
+  按钮白等 30 秒。
+- **开机自启一次性迁移**：`AUTO_START=web` → `web,bridge`（显式配了别的组合不动）。
+- 版本：v0.6.4 / versionCode 79
+- 验证：脚本 `sh -n`、`node --check` 通过；门禁 0 FAIL；43 条网关用例仍全过。
+
+装完点一下模块「操作」：桥接器会起来，面板三个点应陆续变绿。
+
 ## v0.6.3
 
 **不是猜的：把后端整套拉起来跑了 43 条用例（HTTP / HTTPS 各一轮），并且对着真机 8443 复现了 token 失败。**

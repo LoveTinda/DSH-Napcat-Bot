@@ -34,4 +34,9 @@ fi
 # 文档要求：长期跑的服务放后台起，安装器最多等 30 秒。
 ( MODDIR="$MODDIR" DATA="$DATA" sh "$MODDIR/bin/unit.sh" start web >> "$LOG" 2>&1 & )
 say "hotinstall: 新版 web 已在后台启动（日志 $DATA/logs/web.log）"
+# 桥接器一起拉起：只起 web 时面板会一直显示「这个面板还没起来」。
+if [ -d "$MODDIR/units/bridge" ]; then
+  ( MODDIR="$MODDIR" DATA="$DATA" sh "$MODDIR/bin/unit.sh" start bridge >> "$LOG" 2>&1 & )
+  say "hotinstall: 桥接器已在后台启动"
+fi
 exit 0
