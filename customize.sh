@@ -30,6 +30,8 @@ if [ "${KSU_HAS_HOT_INSTALL:-false}" = "true" ]; then
   export MODULE_HOT_INSTALL_REQUEST=true
   export MODULE_HOT_RUN_SCRIPT=hotinstall.sh
   chmod 755 "$MODPATH/hotinstall.sh" 2>/dev/null
+  [ -f "$MODPATH/hotinstall.sh" ] || \
+    ui_print "  ! 安装包里没有 hotinstall.sh：热安装不会停旧实例（打包脚本白名单漏了？）"
   USE_HOT=1
   ui_print "- 已请求热安装：装完立即生效（由 hotinstall.sh 停旧起新），不需要重启"
 fi

@@ -79,6 +79,13 @@ check_root() {
   [ -x "$root/hotinstall.sh" ] || fail "hotinstall.sh 没有可执行位"
   grep -q 'MODULE_HOT_INSTALL_REQUEST' "$root/customize.sh" || fail "customize.sh 没请求热安装（更新要重启才生效）"
   grep -q 'MODULE_HOT_RUN_SCRIPT' "$root/customize.sh" || fail "customize.sh 没设置 MODULE_HOT_RUN_SCRIPT"
+  # 打包白名单漏文件是真实事故：v0.6.0 的 zip 里没有 hotinstall.sh，管理器直接跳过钩子，
+  # 于是「热安装成功、但没有停旧起新」。根目录每个 .sh 都必须进白名单。
+  for _sh in "$root"/*.sh; do
+    [ -f "$_sh" ] || continue
+    _bn=$(basename "$_sh")
+    grep -q "'$_bn'" "$root/bin/make-module.sh" || fail "bin/make-module.sh 的白名单缺 $_bn（打出来的 zip 会少文件）"
+  done
   [ -f "$root/webroot/index.html" ] || fail "缺 webroot/index.html（KernelSU/APatch 模块页的「打开」按钮）"
   [ -f "$root/units/web/ui/module.html" ] || fail "缺 units/web/ui/module.html（模块信息页）"
   grep -q '/module/data.json' "$root/units/web/gateway.mjs" || fail "网关没有 /module/ 路由"

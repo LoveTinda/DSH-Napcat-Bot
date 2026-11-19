@@ -225,3 +225,8 @@
 - 目录：originals/20261119-200823-v0.6.0-hot-install
 - 清单：SHA256SUMS
 
+## 20261119-201441 — v0.6.1-zip-whitelist
+- 文件数：146
+- 目录：originals/20261119-201441-v0.6.1-zip-whitelist
+- 清单：SHA256SUMS
+

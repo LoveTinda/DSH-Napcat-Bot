@@ -20,6 +20,7 @@ import os, sys, zipfile
 root, out = sys.argv[1], sys.argv[2]
 dirs = ['app', 'bin', 'units', 'contracts', 'etc', 'docs', 'webroot']
 files = ['module.prop', 'customize.sh', 'service.sh', 'action.sh', 'uninstall.sh',
+         'hotinstall.sh',
          'README.md', 'RUNBOOK.md', 'AGENTS.md', 'CHANGELOG.md']
 skip_names = {'.runtime', '.git', 'originals', 'local', 'node_modules', '__pycache__', '.DS_Store'}
 skip_ext = ('.log', '.bak', '.tmp', '.pyc')

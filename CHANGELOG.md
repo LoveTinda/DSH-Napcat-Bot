@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## v0.6.1
+
+安装日志把 v0.6.0 的坑指出来了：
+
+```text
+- Hot install requested
+! MODULE_HOT_RUN_SCRIPT 'hotinstall.sh' not found, skipping it
+- Module installed successfully, no reboot required!
+```
+
+热安装**被管理器接受了**（规格这条路是通的），但 **zip 里没有 hotinstall.sh**——
+`bin/make-module.sh` 的打包白名单是手写的，加新脚本时漏了它。于是管理器跳过钩子：
+模块换了新代码，却没有「停旧起新」，旧实例照样占着端口。
+
+- `bin/make-module.sh` 白名单补上 `hotinstall.sh`
+- `bin/check-module.sh` 增加门禁：**模块根目录的每个 `.sh` 都必须出现在打包白名单里**，
+  以后漏一个就直接 FAIL（这次就是这条能提前拦住）
+- `customize.sh`：钩子文件缺失时在安装界面明确喊一句，不再只依赖管理器那行提示
+- 版本：v0.6.1 / versionCode 76
+- 验证：重新打包后 `unzip -l | grep hotinstall` 有 1 条；门禁 0 FAIL
+
 ## v0.6.0
 
 按 KernelSU / SukiSU 的**模块开发规格**重新对了一遍，发现我们一直在绕规格自己造轮子。
