@@ -11,27 +11,14 @@ fi
 ensure_dirs
 
 # 业务进程一律不进宿主：宿主 root 域只留 unit.sh/supervisor，web 和 bridge 一样在
-# DSH App 的 proot 里跑。找不到 proot/rootfs/node 就 78，**不回退宿主 node**。
-# 理由：宿主是 Android root 域，跑 node 意味着把整片 /data 和 root 权限暴露给业务代码；
-# proot 至少只给它 bind 进来的目录。
-# 已经在受限 rootfs 里（unit.sh 的 chroot，或上一轮 proot）就直接跑，不再套一层。
-if [ "${TINDA_IN_PROOT:-0}" = "1" ] || [ -n "${TINDA_RF:-}" ]; then
-  :
-else
-  . "$MODDIR/bin/lib-proot.sh"
-  if ! proot_detect; then
-    log error "找不到可用的 DSH proot（PROOT_BIN=$PROOT_BIN，PROOT_ROOTFS=$PROOT_ROOTFS，包=$PROOT_PKG）"
-    log error "不回退宿主 exec：web 只允许在 proot 里跑。装好 DSH App 或改 PROOT_* 后再试。"
-    exit 78
-  fi
-  log info "web 运行时：DSH proot（$PROOT_ROOTFS）"
-  # APK 里的 proot 依赖同目录的 libtalloc.so 等；直接 exec 会 CANNOT LINK，必须补 LD_LIBRARY_PATH。
-  LD_LIBRARY_PATH="${PROOT_LIBDIR:-$(dirname "$PROOT_BIN")}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-  exec "$PROOT_BIN" --kill-on-exit -0 --rootfs="$PROOT_ROOTFS" --cwd=/root \
-    -b /dev -b /proc -b /sys -b /system -b /apex \
-    -b "$MODDIR:$MODDIR" -b "$DATA:$DATA" \
-    /usr/bin/env TINDA_IN_PROOT=1 PATH=/usr/local/bin:/usr/bin:/bin \
-    /bin/sh "$MODDIR/bin/run-web.sh"
+# DSH App 的 proot 里跑。理由：宿主是 Android root 域，跑 node 等于把整片 /data 和
+# root 权限交给业务代码；proot 至少只给它 bind 进来的那几个目录。
+# proot 的参数、探测和报错全部在 bin/proot-run.sh（web 与 bridge 共用一份，照抄 DSH
+# App 自己启动 proot 的命令行）；proot-run.sh 会给 guest 导出 TINDA_IN_PROOT=1，
+# 所以这里只要能看见这个变量就说明已经在 proot 里，直接往下跑，不再套一层。
+if [ "${TINDA_IN_PROOT:-0}" != "1" ] && [ -z "${TINDA_RF:-}" ]; then
+  log info "web: 启动方式 proot（DSH App runtime rootfs）"
+  exec sh "$MODDIR/bin/proot-run.sh" /bin/sh "$MODDIR/bin/run-web.sh"
 fi
 
 NODE=/usr/local/bin/node

@@ -72,13 +72,10 @@ if [ -n "$NODE" ]; then
       mkdir -p "$d" 2>/dev/null || { log error "建不了配置 guest 目录：$d"; exit 78; }
     done
     touch "$ROOTFS/tmp/tinda-template.json" 2>/dev/null || exit 78
-    "$PROOT_BIN" --kill-on-exit --link2symlink -0 \
-      --rootfs="$ROOTFS" --cwd=/root \
-      -b /dev -b /proc -b /sys \
-      -b "$MODDIR/bin:/tmp/tinda-bin" \
-      -b "$MODDIR/app/config.example.json:/tmp/tinda-template.json" \
-      -b "$DATA/etc:/tmp/tinda-etc" \
-      /usr/local/bin/node /tmp/tinda-bin/app-config.mjs \
+    # 生成配置也要走同一个 proot 启动器：参数只留一份，免得哪天真机日志里又出现
+    # 两套不一样、只有一套能跑的情况。
+    TINDA_EXTRA_BINDS="$MODDIR/bin:/tmp/tinda-bin $MODDIR/app/config.example.json:/tmp/tinda-template.json $DATA/etc:/tmp/tinda-etc" \
+    sh "$MODDIR/bin/proot-run.sh" /usr/local/bin/node /tmp/tinda-bin/app-config.mjs \
       /tmp/tinda-template.json /tmp/tinda-etc/app.json /tmp/tinda-etc/bridge-policy.json "$API" || exit 78
   fi
   chmod 600 "$CONF" 2>/dev/null
@@ -121,34 +118,20 @@ touch "$ROOTFS/tmp/tinda-app.json" 2>/dev/null || { log error "建不了 guest �
 TOKEN=""
 [ -f "$DATA/secrets/napcat.token" ] && TOKEN=$(cat "$DATA/secrets/napcat.token" 2>/dev/null)
 
-# 5) 只 bind 运行必需面：/dev /proc /sys /system /apex + 模块代码 + 状态 + 配置。
-#    不 bind /data、/sdcard；proot 的 -0 只是假 root，不是 Android 真 root。
-set -- \
-  "$PROOT_BIN" --kill-on-exit --link2symlink -0 \
-  --rootfs="$ROOTFS" --cwd=/root \
-  -b /dev -b /proc -b /sys -b /system -b /apex \
-  -b /proc/self/fd:/dev/fd \
-  -b /proc/self/fd/0:/dev/stdin \
-  -b /proc/self/fd/1:/dev/stdout \
-  -b /proc/self/fd/2:/dev/stderr \
-  -b "$MODDIR/app:/tmp/tinda-app" \
-  -b "$STATE:/tmp/tinda-state" \
-  -b "$CONF:/tmp/tinda-app.json"
+# 5) proot 参数不在这里拼：交给 bin/proot-run.sh，和 web 共用同一份（照抄 DSH App
+#    自己启动 proot 的命令行）。这里只声明额外 bind，且只挂运行必需面：
+#    模块 app/、状态、配置、qq profile。不 bind /data、/sdcard。
+BINDS="$MODDIR/app:/tmp/tinda-app $STATE:/tmp/tinda-state $CONF:/tmp/tinda-app.json"
+[ "$BIND_PROFILE" = "1" ] && BINDS="$BINDS $PROFILE_DST:/root/.dsh/profiles/qq"
 
-[ "$BIND_PROFILE" = "1" ] && set -- "$@" -b "$PROFILE_DST:/root/.dsh/profiles/qq"
-
-[ -d "$ROOTFS/var/lib/dsh-app/empty" ] && set -- "$@" -b "$ROOTFS/var/lib/dsh-app/empty:/sys/fs/selinux"
-
-set -- "$@" /usr/bin/env -i \
-  HOME=/root USER=root LOGNAME=root \
-  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-  LANG=C.UTF-8 TERM=xterm-256color TMPDIR=/tmp TZ=Asia/Shanghai \
-  DSH_HOME=/root/.dsh \
-  NODE_OPTIONS="--dns-result-order=ipv4first --max-old-space-size=512" \
-  BRIDGE_STATE_DIR=/tmp/tinda-state \
-  BRIDGE_WORKSPACE=/tmp/tinda-state/workspace \
-  ONEBOT_ACCESS_TOKEN="$TOKEN" \
-  /usr/local/bin/node /tmp/tinda-app/src/index.js /tmp/tinda-app.json
+# guest 环境：PATH/HOME/TMPDIR/TZ/TINDA_IN_PROOT 由 proot-run.sh 统一设置，
+# 这里只补业务自己的变量。
+export TINDA_EXTRA_BINDS="$BINDS"
+export DSH_HOME=/root/.dsh
+export NODE_OPTIONS="--dns-result-order=ipv4first --max-old-space-size=512"
+export BRIDGE_STATE_DIR=/tmp/tinda-state
+export BRIDGE_WORKSPACE=/tmp/tinda-state/workspace
+[ -n "$TOKEN" ] && export ONEBOT_ACCESS_TOKEN="$TOKEN"
 
 log info "proot 启动：pkg=$PKG rootfs=$ROOTFS node=/usr/local/bin/node"
-exec "$@"
+exec sh "$MODDIR/bin/proot-run.sh" /usr/local/bin/node /tmp/tinda-app/src/index.js /tmp/tinda-app.json

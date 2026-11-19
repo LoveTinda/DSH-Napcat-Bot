@@ -180,3 +180,8 @@
 - 目录：originals/20261119-011734-boot-autostart-before
 - 清单：SHA256SUMS
 
+## 20261119-133154 — v0.4.7-proot-run
+- 文件数：142
+- 目录：originals/20261119-133154-v0.4.7-proot-run
+- 清单：SHA256SUMS
+

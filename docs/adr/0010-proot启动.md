@@ -66,6 +66,19 @@ Termux 的 proot Ubuntu 里，uid 0 是 proot 假 root，不是 Android 真 root
 - 如果 DSH rootfs 里没有 `headless` profile，启动失败（78），不静默降级。
 - proot 自身的挂载/路径模拟有性能开销；桥接不是高频计算，可接受。
 
+## 更新（v0.4.7）：参数集中，并照抄 DSH App
+
+v0.4.6 在真机上补掉 `libtalloc.so` 的 `CANNOT LINK` 后，proot 仍一起即退，日志只剩
+`the program is a script but its interpreter … was not found` / `fatal error: see
+libproot.so --help`。根因是我们自己拼的参数比 DSH App 启动 proot 的那份少了几项扩展
+选项和 bind。**这块机器上唯一被验证能跑的 proot 命令行就是 App 自己那一行**，所以：
+
+1. 参数只在 `bin/proot-run.sh` 里定义一次，web 与 bridge 共用；
+2. 逐项对齐 App：`--link2symlink`、`--sysvipc -L`、`/dev/urandom:/dev/random`、
+   `/dev/fd`、`/dev/stdin|stdout|stderr`、`/sys/fs/selinux` 盖空目录、`/dev/shm`；
+3. 启动前跑探针，把 proot 的原始报错原样写进镜像日志——失败时先有数据，再改代码；
+4. 额外 bind 通过 `TINDA_EXTRA_BINDS` 传给同一个脚本，避免每个单元各写一份参数。
+
 ## 何时重审
 
 - DSH App 换了 proot 实现或 rootfs 布局；

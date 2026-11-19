@@ -69,8 +69,11 @@ check_root() {
   grep -q 'unit.sh' "$root/service.sh" || note "service.sh 没给手动启动示例"
   grep -q '^AUTO_START=' "$root/etc/tinda.conf.example" || fail "tinda.conf.example 缺 AUTO_START"
   # 模块信息页：页面文件、网关路由、网关拿得到数据路径，缺一件就是白屏。
-  [ -f "$root/bin/lib-proot.sh" ] || fail "缺 bin/lib-proot.sh（web 没有宿主 node 时的 proot 回退）"
-  grep -q 'lib-proot.sh' "$root/bin/run-web.sh" || fail "run-web.sh 没接 proot 回退（没 node 的机器上 web 起不来）"
+  [ -f "$root/bin/lib-proot.sh" ] || fail "缺 bin/lib-proot.sh（proot/rootfs 探测）"
+  [ -f "$root/bin/proot-run.sh" ] || fail "缺 bin/proot-run.sh（web 与 bridge 共用的 proot 启动器）"
+  [ -x "$root/bin/proot-run.sh" ] || fail "bin/proot-run.sh 没有可执行位"
+  grep -q 'proot-run.sh' "$root/bin/run-web.sh" || fail "run-web.sh 没接 proot 启动器（没 node 的机器上 web 起不来）"
+  grep -q 'proot-run.sh' "$root/bin/run-app-proot.sh" || fail "run-app-proot.sh 没接 proot 启动器（bridge 会另写一份参数）"
   [ -f "$root/webroot/index.html" ] || fail "缺 webroot/index.html（KernelSU/APatch 模块页的「打开」按钮）"
   [ -f "$root/units/web/ui/module.html" ] || fail "缺 units/web/ui/module.html（模块信息页）"
   grep -q '/module/data.json' "$root/units/web/gateway.mjs" || fail "网关没有 /module/ 路由"
@@ -89,7 +92,13 @@ check_root() {
   grep -q '^TYPE=proot' "$root/units/web/unit.conf" || fail "web 必须是 TYPE=proot（用户明确要求不用 chroot）"
   # web 也只允许 proot：宿主是 Android root 域，不能跑业务 node。
   grep -q 'TINDA_IN_PROOT' "$root/bin/run-web.sh" || fail "run-web.sh 没有 proot 重入保护"
-  grep -q '不回退宿主' "$root/bin/run-web.sh" || fail "run-web.sh 可能回退宿主 exec（不允许）"
+  # 结构校验，不靠注释：proot 启动那一行必须出现在「真的起网关」之前，
+  # 也就是说 run-web.sh 里除了 proot 里的那一路，没有第二条起 node 的路。
+  _pr_line=$(grep -n 'proot-run.sh' "$root/bin/run-web.sh" | head -1 | cut -d: -f1)
+  _gw_line=$(grep -n 'units/web/gateway.mjs' "$root/bin/run-web.sh" | head -1 | cut -d: -f1)
+  if [ -z "$_pr_line" ] || [ -z "$_gw_line" ] || [ "$_gw_line" -le "$_pr_line" ]; then
+    fail "run-web.sh 里网关可能绕过 proot 直接起（proot-run 行=$_pr_line，网关行=$_gw_line）"
+  fi
   grep -qE 'command -v node' "$root/bin/run-web.sh" && grep -q 'WEB_RUNTIME' "$root/bin/run-web.sh" \
     && fail "run-web.sh 仍有宿主 node / WEB_RUNTIME 分支"
   [ -f "$root/app/src/index.js" ] || fail "缺单应用入口 app/src/index.js"

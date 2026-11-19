@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## v0.4.7
+
+v0.4.6 补上 `LD_LIBRARY_PATH` 之后，真机日志里的 `CANNOT LINK` 没了，剩下的是 proot
+自己刚起来就退出：
+
+```text
+* the program is a script but its interpreter (eg. /bin/sh) was not found;
+* the program is an ELF but its interpreter (eg. ld-linux.so) was not found;
+...
+fatal error: see `libproot.so --help`.
+```
+
+也就是说 proot 根本没进到 guest 程序，端口自然不监听。我们拼的参数和 DSH App 自己启动
+proot 的命令行差了几项——那是这台机器上唯一被验证过能跑的一份。
+
+- 新增 `bin/proot-run.sh`：**唯一一份** proot 参数，web 与 bridge 共用；照抄 DSH App：
+  `--kill-on-exit --link2symlink --sysvipc -L -0`、`/dev/urandom:/dev/random`、
+  `/dev/fd`/`/dev/stdin,out,err`、`/sys/fs/selinux` 盖空目录、`/dev/shm`
+- 启动前跑一次探针（`proot-run.sh probe`）：proot 起不来就把它的**原始报错**写进
+  `/sdcard/Bridge/Logs/supervisor.log`；完整参数不通时自动退回基础参数并记一笔
+- 探针结论缓存在 `$DATA/run/proot.mode`，稳态启动不再多跑一次，不影响启动速度
+- `unit.sh` 失败时带回的日志从 6 行加到 40 行（proot 报错块本身 7 行，6 行会把
+  `execve` 那行截掉）；连续失败放弃重试时，把整份单元日志脱敏放到共享存储
+- `run-web.sh` 不再自己拼 proot 参数，也不再依赖 guest 里的 `/usr/bin/env`
+- 版本：v0.4.7 / versionCode 66
+- 验证：`sh -n` 全部通过；门禁 0 FAIL。真机待确认 `[web] listening`
+
 ## v0.4.6
 
 真机日志终于给出了 proot 失败的确切原因：

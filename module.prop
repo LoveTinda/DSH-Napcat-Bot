@@ -1,7 +1,7 @@
 id=tinda-bot
 name=Tinda Bot
-version=v0.4.6
-versionCode=65
+version=v0.4.7
+versionCode=66
 author=tinda
-description=QQ <-> DSH 桥接器模块：修 proot 缺少 libtalloc.so 导致的 CANNOT LINK（补 LD_LIBRARY_PATH）；web/bridge 强制 TYPE=proot；单元退出日志进共享存储；模块页「打开」直达状态页。
+description=QQ <-> DSH 桥接器模块：proot 参数集中到 bin/proot-run.sh 并照抄 DSH App 自己的命令行（补 --link2symlink/--sysvipc/-L 与 /dev/fd 系列 bind），启动前跑探针把 proot 原始报错写进日志；失败日志不再截断；web/bridge 强制 TYPE=proot。
 updateJson=https://raw.githubusercontent.com/LoveTinda/DSH-Napcat-Bot/main/update.json

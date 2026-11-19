@@ -257,11 +257,20 @@ do_start() {
       rc=$?
       [ -f "$PID_FILE.stop" ] && break
       fails=$((fails+1))
-      [ "$fails" -ge "$RESTART_MAX" ] && { log fatal "$NAME 连续失败 $fails 次，停止重试"; break; }
+      if [ "$fails" -ge "$RESTART_MAX" ]; then
+        log fatal "$NAME 连续失败 $fails 次，停止重试"
+        # 放弃重试时把整份单元日志脱敏放一份到共享存储：proot/node 的原始报错都在里面，
+        # 不用 root 也能直接读，省得只看到被截断的尾巴。
+        mkdir -p "${MIRROR_DIR:-/sdcard/Bridge/Logs}" 2>/dev/null
+        redact < "$LOG_FILE" > "${MIRROR_DIR:-/sdcard/Bridge/Logs}/$NAME.log" 2>/dev/null
+        break
+      fi
       log warn "$NAME 退出 rc=$rc（第 $fails 次），退避重启"
-      # 退出原因只写在单元日志里（例如 chroot 挂载、node 报错、端口占用）。
+      # 退出原因只写在单元日志里（例如 proot 起不来、端口占用、node 报错）。
       # 把尾部带回 supervisor，log() 会镜像到 /sdcard/Bridge/Logs，没有 root 也能看。
-      tail -n 6 "$LOG_FILE" 2>/dev/null | while IFS= read -r _l; do
+      # 40 行是因为 proot 的报错块本身就有 7 行（possible causes + fatal error），
+      # 只带 6 行会把最关键的 execve 那行截掉。
+      tail -n 40 "$LOG_FILE" 2>/dev/null | while IFS= read -r _l; do
         [ -n "$_l" ] && log warn "[$NAME] $_l"
       done
       sleep $(( fails < 5 ? fails * 3 : BACKOFF_MAX ))
