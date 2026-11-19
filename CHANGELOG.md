@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## v0.4.6
+
+真机日志终于给出了 proot 失败的确切原因：
+
+```text
+CANNOT LINK EXECUTABLE "…/lib/arm64/libproot.so":
+  library "libtalloc.so" not found: needed by main executable
+```
+
+DSH App 里的 `libproot.so` 不是静态链接，依赖同目录的 `libtalloc.so`。我们直接 exec 绝对路径时，
+Android 动态链接器不会去 APK 的 lib 目录找依赖，于是 rc=1、端口永远起不来。
+
+- `bin/lib-proot.sh` 探测 `PROOT_LIBDIR`：优先 proot 同目录，找不到再在 `/data/app` 里找
+  `libtalloc.so` 所在目录
+- `run-web.sh` 与 `run-app-proot.sh` 在 exec proot 前设置
+  `LD_LIBRARY_PATH=${PROOT_LIBDIR}:…`；两个单元共用这套修复（bridge 之前也会栽在同一处）
+- 版本：v0.4.6 / versionCode 65
+- 验证：`sh -n` 通过；守卫 0 FAIL / 1 warn。真机待刷入确认 `[web] listening`
+
 ## v0.4.5
 
 - **web 单元改为 `TYPE=proot`**：不再走 chroot。之前 `TYPE=auto` 会在「有 rootfs + unshare 探针

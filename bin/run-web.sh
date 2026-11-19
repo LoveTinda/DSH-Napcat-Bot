@@ -25,6 +25,8 @@ else
     exit 78
   fi
   log info "web 运行时：DSH proot（$PROOT_ROOTFS）"
+  # APK 里的 proot 依赖同目录的 libtalloc.so 等；直接 exec 会 CANNOT LINK，必须补 LD_LIBRARY_PATH。
+  LD_LIBRARY_PATH="${PROOT_LIBDIR:-$(dirname "$PROOT_BIN")}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   exec "$PROOT_BIN" --kill-on-exit -0 --rootfs="$PROOT_ROOTFS" --cwd=/root \
     -b /dev -b /proc -b /sys -b /system -b /apex \
     -b "$MODDIR:$MODDIR" -b "$DATA:$DATA" \

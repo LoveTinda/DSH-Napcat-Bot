@@ -17,6 +17,11 @@ proot_detect() {
     _cr=$(cut -d'|' -f2 "$_cache" 2>/dev/null)
     if [ -n "$_cb" ] && [ -x "$_cb" ] && [ -x "$_cr/usr/local/bin/node" ]; then
       PROOT_BIN=$_cb; PROOT_ROOTFS=$_cr
+      PROOT_LIBDIR=$(dirname "$PROOT_BIN")
+      if [ ! -e "$PROOT_LIBDIR/libtalloc.so" ]; then
+        _lf=$(find /data/app -path "*${PROOT_PKG}*" -name libtalloc.so 2>/dev/null | head -1)
+        [ -n "$_lf" ] && PROOT_LIBDIR=$(dirname "$_lf")
+      fi
       return 0
     fi
   fi
@@ -41,6 +46,15 @@ proot_detect() {
     done
   fi
   [ -n "$PROOT_ROOTFS" ] && [ -x "$PROOT_ROOTFS/usr/local/bin/node" ] || return 1
+
+  # proot 不是静态链接：真机日志是
+  #   CANNOT LINK EXECUTABLE ".../libproot.so": library "libtalloc.so" not found
+  # 直接 exec 绝对路径时动态链接器不会去 APK 的 lib 目录找依赖，必须补 LD_LIBRARY_PATH。
+  PROOT_LIBDIR=$(dirname "$PROOT_BIN")
+  if [ ! -e "$PROOT_LIBDIR/libtalloc.so" ]; then
+    _lf=$(find /data/app -path "*${PROOT_PKG}*" -name libtalloc.so 2>/dev/null | head -1)
+    [ -n "$_lf" ] && PROOT_LIBDIR=$(dirname "$_lf")
+  fi
   printf '%s|%s\n' "$PROOT_BIN" "$PROOT_ROOTFS" > "$_cache" 2>/dev/null
   chmod 600 "$_cache" 2>/dev/null
   return 0

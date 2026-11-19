@@ -56,7 +56,15 @@ CONF="$DATA/etc/app.json"
 if [ ! -f "$CONF" ]; then
   POLICY=$(conf_get BRIDGE_POLICY_FILE "$DATA/etc/bridge-policy.json")
   API=$(conf_get NAPCAT_API "http://127.0.0.1:3001")
-  if [ -n "$NODE" ]; then
+  # APK 里的 proot 不是静态链接（缺 libtalloc.so 会 CANNOT LINK），exec 前补同目录库路径。
+PROOT_LIBDIR=$(dirname "$PROOT_BIN")
+[ -e "$PROOT_LIBDIR/libtalloc.so" ] || {
+  _lf=$(find /data/app -path "*${PKG}*" -name libtalloc.so 2>/dev/null | head -1)
+  [ -n "$_lf" ] && PROOT_LIBDIR=$(dirname "$_lf")
+} 2>/dev/null
+export LD_LIBRARY_PATH="${PROOT_LIBDIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+if [ -n "$NODE" ]; then
     "$NODE" "$MODDIR/bin/app-config.mjs" \
       "$MODDIR/app/config.example.json" "$CONF" "$POLICY" "$API" || exit 78
   else
