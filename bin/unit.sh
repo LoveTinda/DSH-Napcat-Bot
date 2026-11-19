@@ -246,6 +246,7 @@ do_start() {
   rm -f "$PID_FILE.stop"
   # 长跑进程不会自己轮转日志；每次启动前检查一次，避免日志无限增长。
   rotate_log_file "$LOG_FILE"
+  _start_sz=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
   log info "$NAME 启动"
   # 每次都记下跑的是哪份代码：不写这一行，就只能靠「有没有某个版本才有的日志」反推，
   # 真机上已经为此白折腾过好几轮。
@@ -309,6 +310,20 @@ do_start() {
     # 整份单元日志也脱敏放一份到共享存储：DSH App 能直接读，不用 root 捞 /data/adb。
     mkdir -p "${MIRROR_DIR:-/sdcard/Bridge/Logs}" 2>/dev/null
     redact < "$LOG_FILE" > "${MIRROR_DIR:-/sdcard/Bridge/Logs}/$NAME.log" 2>/dev/null
+  fi
+  # 卡死检测：proot 卡住时进程还活着、日志一动不动，只看 running() 会以为一切正常
+  # （真机上就是这样：显示「已启动 pid=…」，端口永远连不上，日志停在半句话）。
+  if [ "$TYPE" = "proot" ]; then
+    (
+      sleep 30
+      [ -f "$PID_FILE.stop" ] && exit 0
+      _sz1=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
+      [ "${_sz1:-0}" -gt "${_start_sz:-0}" ] && exit 0
+      log fatal "$NAME 启动后 30 秒单元日志没有增长（疑似卡在 proot），最后 3 行："
+      tail -n 3 "$LOG_FILE" 2>/dev/null | while IFS= read -r _l; do
+        [ -n "$_l" ] && log warn "[$NAME] $_l"
+      done
+    ) >/dev/null 2>&1 &
   fi
 }
 

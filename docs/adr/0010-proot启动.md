@@ -87,6 +87,11 @@ libproot.so --help`。根因是我们自己拼的参数比 DSH App 启动 proot 
 `PROOT_LOADER=<proot 目录>/libproot-loader.so` 三项跑起来的，现在照抄。
 教训：**"照抄那唯一一份能跑的命令行"要连环境一起照抄**，只看 argv 会漏掉这类致命项。
 
+**v0.5.0 现场**：环境补齐后 proot 仍会在 fork tracee 之前静默卡住（进程在、无 tracee、
+无监听、无输出）。与 App 命令行剩下的唯一实质差异是 `--kill-on-exit`，而父进程一个是
+Java、一个是 sh supervisor，环境已不可类比，因此改为默认不带（`PROOT_KILL_ON_EXIT=1`
+可回退），并让探针带 `--debug=1` 与超时，把「卡在哪一步」变成可读日志。
+
 ## 何时重审
 
 - DSH App 换了 proot 实现或 rootfs 布局；

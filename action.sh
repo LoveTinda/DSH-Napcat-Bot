@@ -16,7 +16,8 @@ echo "版本：${VER:-unknown}（$MODDIR）"
 # （之前就是这样，只看到「已启动」然后端口一直连不上）。
 echo "proot 探针：$(MODDIR="$MODDIR" DATA="$DATA" sh "$MODDIR/bin/proot-run.sh" probe 2>&1 | tail -2 | tr '\n' ' ')"
 
-sh "$MODDIR/bin/unit.sh" start web
+# 用 restart 而不是 start：卡住的旧实例会让 start 直接「已在运行」返回，点了没反应。
+sh "$MODDIR/bin/unit.sh" restart web
 sleep 1
 
 PORT=$(conf_get WEB_PORT 8443)

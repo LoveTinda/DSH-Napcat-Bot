@@ -190,3 +190,8 @@
 - 目录：originals/20261119-135130-v0.4.9-update-takes-effect
 - 清单：SHA256SUMS
 
+## 20261119-135743 — v0.5.0-no-kill-on-exit
+- 文件数：143
+- 目录：originals/20261119-135743-v0.5.0-no-kill-on-exit
+- 清单：SHA256SUMS
+

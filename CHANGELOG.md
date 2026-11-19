@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## v0.5.0
+
+13:54 那次日志证明 v0.4.9 确实生效了：
+
+```text
+web 代码：v0.4.9 @ /data/adb/modules/tinda-bot     ← 安装后同步运行目录起作用了
+proot 临时目录：…/cache/proot-tmp                  ← PROOT_TMP_DIR 也生效了
+proot 启动：mode=full pkg=io.github.ccch1mneyyy.dsh_app rootfs=…
+```
+
+然后就没了。现场取证：
+
+- supervisor（pid 19580）**还活着**（`kill -0` 返回 EPERM）
+- 它下面只有 19581 一个子进程，**再没有 proot 的 tracee**
+- 8443/8444/8445/8088 **没有任何监听**
+- 日志停在 `proot 启动` 那一行，既没报错也没退出
+
+也就是说 proot 在 fork 出 tracee 之前就卡住了，而且一声不吭。
+
+改动：
+
+- **默认去掉 `--kill-on-exit`**：它是我们与 DSH App 命令行唯一的实质差异，且 App 是
+  「Java 父进程 + 它」，我们是「sh supervisor + 它」。收尾由 `unit.sh stop` 杀整棵树；
+  要复现 App 行为设 `PROOT_KILL_ON_EXIT=1`
+- **探针带 `--debug=1` + 手动超时**（0.1×100 或 1×20 秒，超时直接 kill）：卡住时把
+  proot 停在哪一步的调试行写进日志，不再只有半句话
+- **探针缓存按版本失效**（`$DATA/run/proot.mode` 现在是 `版本|mode`）：升级后必重探一次。
+  v0.4.9 正是沿用了上一版的缓存、跳过探针，才又只能靠猜
+- `unit.sh` 加**卡死检测**：proot 单元启动 30 秒后单元日志没有增长，直接记
+  `疑似卡在 proot` 并带上最后 3 行
+- 「操作」按钮改用 `restart`：卡住的旧实例会让 `start` 直接「已在运行」返回，点了没反应
+- 版本：v0.5.0 / versionCode 69
+- 验证：`sh -n` 通过；门禁 0 FAIL；本地假 proot 验证版本化的缓存会重探、argv 里已无
+  `--kill-on-exit`
+
 ## v0.4.9
 
 13:45 那次启动的日志看着「不讲道理」：报完 `proot 探针失败` 就再没有下文，也没有

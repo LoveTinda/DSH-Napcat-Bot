@@ -108,9 +108,13 @@ unset _bd _src _BINDS_OK
 # full = DSH App 用的完整扩展参数；minimal = 只有基础参数（万一换上别的 proot 构建）。
 # 额外 bind 由调用方用 TINDA_EXTRA_BINDS="src:dst src:dst" 传进来（bridge 挂 app/state/配置）。
 _proot_flags() {
-  # 探针用 nokill：--kill-on-exit 是给「业务真跑起来之后」收拾残留用的，
-  # 探针自己跑完就退，没必要带这个，也免得它异常时波及父进程组。
-  [ "$2" = nokill ] || printf '%s\n' --kill-on-exit
+  # --kill-on-exit 默认不带：DSH App 是「Java 进程 + 它」，我们这边是「sh supervisor」，
+  # 真机上出现过 proot 起来后既没有 tracee、也没有任何输出、端口不监听（就是卡住）。
+  # 收尾交给 unit.sh stop 杀整棵树足够；要复现 App 的行为设 PROOT_KILL_ON_EXIT=1。
+  # 探针永远不带（nokill）。
+  if [ "${PROOT_KILL_ON_EXIT:-0}" = "1" ] && [ "$2" != nokill ]; then
+    printf '%s\n' --kill-on-exit
+  fi
   [ "$1" = full ] && printf '%s\n' --link2symlink --sysvipc -L
   printf '%s\n' -0 "--rootfs=$PROOT_ROOTFS" --cwd=/root
   printf '%s\n' -b /dev -b /dev/urandom:/dev/random -b /proc \
@@ -128,19 +132,38 @@ _proot_flags() {
 }
 
 _oneline() { printf '%s' "$1" | tr '\n' ' ' | cut -c1-600; }
+# 失败时更要看最后几行：proot 的报错和调试的「停在哪一步」都在尾部。
+_tailof() { printf '%s' "$1" | tail -n 12 | tr '\n' ' ' | cut -c1-900; }
 
 # 探针：跑一条 /bin/sh -c，成功会打印 PROOT_OK；失败把 proot 的原始报错和退出码原样返回。
 # 带上 rc 是为了区分「proot 一声不吭退出」和「proot 打印了报错」这两种失败。
+# 探针步长/上限：有的 toybox sleep 不认小数，认就 0.1 秒 × 100（10 秒），
+# 不认就 1 秒 × 20（20 秒）。超时就 kill，绝不允许「悄悄挂住」。
+if sleep 0.1 2>/dev/null; then _PROBE_STEP=0.1; _PROBE_LIMIT=100; else _PROBE_STEP=1; _PROBE_LIMIT=20; fi
+
+# 探针：跑一条 /bin/sh -c，成功会打印 PROOT_OK；失败把 proot 的原始输出（带 --debug=1
+# 的调试行）带回来，好知道它停在哪一步。
 _probe() {
   set -f
-  set -- $(_proot_flags "$1" nokill) /bin/sh -c 'echo PROOT_OK'
+  set -- $(_proot_flags "$1" nokill) --debug=1 /bin/sh -c 'echo PROOT_OK'
   set +f
-  # 探针带超时：proot 卡住时不能让整个启动静默挂死（真机上出现过报了一行就再没有下文）。
-  _to=""
-  command -v timeout >/dev/null 2>&1 && _to="timeout 20"
-  _po=$(LD_LIBRARY_PATH="$_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $_to "$PROOT_BIN" "$@" 2>&1)
-  _prc=$?
-  printf '%s\n[rc=%s]' "$_po" "$_prc"
+  _pout="$DATA/run/proot.probe.$$"
+  : > "$_pout" 2>/dev/null
+  LD_LIBRARY_PATH="$_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$PROOT_BIN" "$@" > "$_pout" 2>&1 &
+  _pp=$!
+  _n=0
+  while kill -0 "$_pp" 2>/dev/null; do
+    _n=$((_n+1))
+    [ "$_n" -ge "$_PROBE_LIMIT" ] && break
+    sleep "$_PROBE_STEP" 2>/dev/null || sleep 1
+  done
+  if kill -0 "$_pp" 2>/dev/null; then
+    kill -9 "$_pp" 2>/dev/null
+    printf '[proot 超过探测上限仍在运行，已 kill]\n'
+  fi
+  wait "$_pp" 2>/dev/null
+  cat "$_pout" 2>/dev/null
+  rm -f "$_pout" 2>/dev/null
 }
 
 # 被信号打断时也要留一行，否则日志会停在半句话上，看不出是挂住还是被杀。
@@ -148,11 +171,18 @@ trap 'log fatal "proot-run 收到 TERM，退出"' TERM
 trap 'log fatal "proot-run 收到 HUP，退出"' HUP
 trap 'log fatal "proot-run 收到 INT，退出"' INT
 
+# 缓存要带版本：升级后参数/环境可能已经变了，缓存里那个「上次能用」不再可信。
+# （v0.4.9 就是因为沿用了上一版的 full 缓存，跳过了探针，结果又只能靠猜。）
+_VERKEY=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)
+_VERKEY=${_VERKEY:-unknown}
 MODE_CACHE="$DATA/run/proot.mode"
 _mode=""
 if [ "$_is_probe" = 0 ] && [ -s "$MODE_CACHE" ]; then
-  _mode=$(cat "$MODE_CACHE" 2>/dev/null)
-  case "$_mode" in full|minimal) ;; *) _mode="" ;; esac
+  _line=$(head -1 "$MODE_CACHE" 2>/dev/null)
+  case "$_line" in
+    "$_VERKEY|full") _mode=full ;;
+    "$_VERKEY|minimal") _mode=minimal ;;
+  esac
 fi
 
 if [ -z "$_mode" ]; then
@@ -163,7 +193,7 @@ if [ -z "$_mode" ]; then
       _mode=full
       log info "proot 探针通过（完整参数）rootfs=$PROOT_ROOTFS" ;;
     *)
-      log warn "proot 探针失败（完整参数）：$(_oneline "$_out")"
+      log warn "proot 探针失败（完整参数）：$(_tailof "$_out")"
       log info "proot 探针（基础参数）开始"
       _out=$(_probe minimal)
       case "$_out" in
@@ -171,12 +201,12 @@ if [ -z "$_mode" ]; then
           _mode=minimal
           log warn "proot 退回基础参数可用（这份 proot 不认扩展选项）" ;;
         *)
-          log error "proot 起不来，两种参数都试过：$(_oneline "$_out")"
+          log error "proot 起不来，两种参数都试过：$(_tailof "$_out")"
           log error "proot=$PROOT_BIN rootfs=$PROOT_ROOTFS"
           exit 78 ;;
       esac ;;
   esac
-  printf '%s\n' "$_mode" > "$MODE_CACHE" 2>/dev/null
+  printf '%s|%s\n' "$_VERKEY" "$_mode" > "$MODE_CACHE" 2>/dev/null
 fi
 
 if [ "$_is_probe" = 1 ]; then
