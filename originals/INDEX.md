@@ -200,3 +200,8 @@
 - 目录：originals/20261119-193916-v0.5.1-bisect
 - 清单：SHA256SUMS
 
+## 20261119-195017 — v0.5.2-detach-readiness
+- 文件数：143
+- 目录：originals/20261119-195017-v0.5.2-detach-readiness
+- 清单：SHA256SUMS
+

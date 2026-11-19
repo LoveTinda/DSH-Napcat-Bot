@@ -577,7 +577,11 @@ const REDIRECT_PORT = Number(process.env.WEB_REDIRECT_PORT || 0);
 if (useTls && REDIRECT_PORT) {
   listen(http.createServer((req, res) => {
     const host = (req.headers.host || '').replace(/[^A-Za-z0-9.:\[\]-]/g, '') || BIND;
-    res.writeHead(301, { location: `https://${host}:${PORT}${req.url}` });
+    // Host 头带端口（192.168.1.3:8088），直接拼会变成 https://192.168.1.3:8088:8443/ ——
+    // 浏览器打不开，看起来就像「跳转后卡住」。这里只取主机部分。
+    const m = /^(\[[0-9a-fA-F:]+\]|[^:]+)(?::\d+)?$/.exec(host);
+    const hostOnly = m ? m[1] : host;
+    res.writeHead(301, { location: `https://${hostOnly}:${PORT}${req.url}` });
     res.end();
   }), REDIRECT_PORT, 'redirect', false);
 }

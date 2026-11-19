@@ -300,6 +300,26 @@ do_start() {
   done
   if running; then
     log info "$NAME 已启动 pid=$(cat "$PID_FILE")"
+    # 「进程活着」不等于「服务在听」。真机上出现过：显示已启动、端口一直连不上、
+    # 日志停在启动那行。unit.conf 里给 READY_MARKER 就能把这种情况点出来。
+    if [ -n "$READY_MARKER" ]; then
+      _ri=0
+      while [ "$_ri" -lt 40 ]; do
+        tail -c +$(( ${_start_sz:-0} + 1 )) "$LOG_FILE" 2>/dev/null | grep -qF "$READY_MARKER" && break
+        _ri=$((_ri+1))
+        sleep 0.5 2>/dev/null || sleep 1
+      done
+      if tail -c +$(( ${_start_sz:-0} + 1 )) "$LOG_FILE" 2>/dev/null | grep -qF "$READY_MARKER"; then
+        log info "$NAME 已就绪（$READY_MARKER）"
+      else
+        log fatal "$NAME 没等到就绪标记「$READY_MARKER」，最后 5 行："
+        tail -n 5 "$LOG_FILE" 2>/dev/null | while IFS= read -r _l; do
+          [ -n "$_l" ] && log warn "[$NAME] $_l"
+        done
+        mkdir -p "${MIRROR_DIR:-/sdcard/Bridge/Logs}" 2>/dev/null
+        redact < "$LOG_FILE" > "${MIRROR_DIR:-/sdcard/Bridge/Logs}/$NAME.log" 2>/dev/null
+      fi
+    fi
   else
     log warn "$NAME 未确认运行，见 $LOG_FILE"
     # 失败原因往往只在单元日志里（例如 chroot 的「挂模块代码失败」）。把尾部带回

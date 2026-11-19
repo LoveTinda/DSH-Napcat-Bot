@@ -127,6 +127,10 @@ _proot_flags() {
     printf '%s\n' -b "$PROOT_ROOTFS/var/lib/dsh-app/empty:/sys/fs/selinux"
   [ -d "$PROOT_ROOTFS/var/lib/dsh-app/shm" ] && \
     printf '%s\n' -b "$PROOT_ROOTFS/var/lib/dsh-app/shm:/dev/shm"
+  # 让 guest 里的 log() 也能镜像到共享存储：只挂这一个日志目录（不是整个 /sdcard）。
+  # 不挂的话 guest 日志只落在 $DATA/logs（只有 root 能读），外面看到的就是
+  # 「proot 启动」之后再没有任何一行——真机排查就卡在这。
+  [ -d "$MIRROR_DIR" ] && printf '%s\n' -b "$MIRROR_DIR:$MIRROR_DIR"
   for _bd in ${TINDA_EXTRA_BINDS:-}; do printf '%s\n' -b "$_bd"; done
   return 0
 }

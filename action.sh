@@ -17,8 +17,21 @@ echo "版本：${VER:-unknown}（$MODDIR）"
 echo "proot 探针：$(MODDIR="$MODDIR" DATA="$DATA" sh "$MODDIR/bin/proot-run.sh" probe 2>&1 | tail -2 | tr '\n' ' ')"
 
 # 用 restart 而不是 start：卡住的旧实例会让 start 直接「已在运行」返回，点了没反应。
-sh "$MODDIR/bin/unit.sh" restart web
-sleep 1
+# 必须脱离管理器的进程组：管理器跑完 action.sh 会整组收尾，之前就是「启动了、也听过
+# 端口、几秒后无声消失」，日志里连退出码都没有。
+_sz=$(stat -c %s "$DATA/logs/web.log" 2>/dev/null || echo 0)
+if command -v setsid >/dev/null 2>&1; then
+  ( MODDIR="$MODDIR" DATA="$DATA" nohup setsid sh "$MODDIR/bin/unit.sh" restart web >/dev/null 2>&1 & )
+else
+  ( MODDIR="$MODDIR" DATA="$DATA" nohup sh "$MODDIR/bin/unit.sh" restart web >/dev/null 2>&1 & )
+fi
+# 等就绪标记真的出现（最多 30 秒），别刚起就回「已启动」骗自己。
+_i=0
+while [ "$_i" -lt 60 ]; do
+  tail -c +$(( _sz + 1 )) "$DATA/logs/web.log" 2>/dev/null | grep -qF '[web] listening' && break
+  _i=$((_i+1))
+  sleep 0.5 2>/dev/null || sleep 1
+done
 
 PORT=$(conf_get WEB_PORT 8443)
 IP=$(conf_get WEB_LAN_IP "")
