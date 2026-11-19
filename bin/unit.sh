@@ -247,6 +247,10 @@ do_start() {
   # 长跑进程不会自己轮转日志；每次启动前检查一次，避免日志无限增长。
   rotate_log_file "$LOG_FILE"
   log info "$NAME 启动"
+  # 每次都记下跑的是哪份代码：不写这一行，就只能靠「有没有某个版本才有的日志」反推，
+  # 真机上已经为此白折腾过好几轮。
+  _ver=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)
+  log info "$NAME 代码：${_ver:-unknown} @ $MODDIR"
   (
     fails=0
     while :; do

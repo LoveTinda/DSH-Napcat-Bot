@@ -10,6 +10,12 @@ DATA=/data/adb/tinda-bot
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 
+VER=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)
+echo "版本：${VER:-unknown}（$MODDIR）"
+# 先跑一次 proot 探针并把结论打在这一屏：起不来时不用去翻日志猜
+# （之前就是这样，只看到「已启动」然后端口一直连不上）。
+echo "proot 探针：$(MODDIR="$MODDIR" DATA="$DATA" sh "$MODDIR/bin/proot-run.sh" probe 2>&1 | tail -2 | tr '\n' ' ')"
+
 sh "$MODDIR/bin/unit.sh" start web
 sleep 1
 

@@ -24,7 +24,8 @@ log() {
   echo "$_ts $*"
 }
 
-log "service.sh 启动：MODDIR=$MODDIR"
+_ver=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)
+log "service.sh 启动：MODDIR=$MODDIR 版本=${_ver:-unknown}"
 [ -d /data/adb ] && log "形态：Android root（/data/adb 存在）" || log "warn: 没有 /data/adb，不是模块形态"
 
 # 开机自启：等待 boot_completed 和逐个拉起单元都放在后台的 boot-start.sh 里，

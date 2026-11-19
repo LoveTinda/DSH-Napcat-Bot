@@ -108,7 +108,9 @@ unset _bd _src _BINDS_OK
 # full = DSH App 用的完整扩展参数；minimal = 只有基础参数（万一换上别的 proot 构建）。
 # 额外 bind 由调用方用 TINDA_EXTRA_BINDS="src:dst src:dst" 传进来（bridge 挂 app/state/配置）。
 _proot_flags() {
-  printf '%s\n' --kill-on-exit
+  # 探针用 nokill：--kill-on-exit 是给「业务真跑起来之后」收拾残留用的，
+  # 探针自己跑完就退，没必要带这个，也免得它异常时波及父进程组。
+  [ "$2" = nokill ] || printf '%s\n' --kill-on-exit
   [ "$1" = full ] && printf '%s\n' --link2symlink --sysvipc -L
   printf '%s\n' -0 "--rootfs=$PROOT_ROOTFS" --cwd=/root
   printf '%s\n' -b /dev -b /dev/urandom:/dev/random -b /proc \
@@ -131,12 +133,20 @@ _oneline() { printf '%s' "$1" | tr '\n' ' ' | cut -c1-600; }
 # 带上 rc 是为了区分「proot 一声不吭退出」和「proot 打印了报错」这两种失败。
 _probe() {
   set -f
-  set -- $(_proot_flags "$1") /bin/sh -c 'echo PROOT_OK'
+  set -- $(_proot_flags "$1" nokill) /bin/sh -c 'echo PROOT_OK'
   set +f
-  _po=$(LD_LIBRARY_PATH="$_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" "$PROOT_BIN" "$@" 2>&1)
+  # 探针带超时：proot 卡住时不能让整个启动静默挂死（真机上出现过报了一行就再没有下文）。
+  _to=""
+  command -v timeout >/dev/null 2>&1 && _to="timeout 20"
+  _po=$(LD_LIBRARY_PATH="$_LIBDIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" $_to "$PROOT_BIN" "$@" 2>&1)
   _prc=$?
   printf '%s\n[rc=%s]' "$_po" "$_prc"
 }
+
+# 被信号打断时也要留一行，否则日志会停在半句话上，看不出是挂住还是被杀。
+trap 'log fatal "proot-run 收到 TERM，退出"' TERM
+trap 'log fatal "proot-run 收到 HUP，退出"' HUP
+trap 'log fatal "proot-run 收到 INT，退出"' INT
 
 MODE_CACHE="$DATA/run/proot.mode"
 _mode=""
@@ -146,6 +156,7 @@ if [ "$_is_probe" = 0 ] && [ -s "$MODE_CACHE" ]; then
 fi
 
 if [ -z "$_mode" ]; then
+  log info "proot 探针（完整参数）开始"
   _out=$(_probe full)
   case "$_out" in
     *PROOT_OK*)
@@ -153,6 +164,7 @@ if [ -z "$_mode" ]; then
       log info "proot 探针通过（完整参数）rootfs=$PROOT_ROOTFS" ;;
     *)
       log warn "proot 探针失败（完整参数）：$(_oneline "$_out")"
+      log info "proot 探针（基础参数）开始"
       _out=$(_probe minimal)
       case "$_out" in
         *PROOT_OK*)

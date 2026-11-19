@@ -185,3 +185,8 @@
 - 目录：originals/20261119-133154-v0.4.7-proot-run
 - 清单：SHA256SUMS
 
+## 20261119-135130 — v0.4.9-update-takes-effect
+- 文件数：143
+- 目录：originals/20261119-135130-v0.4.9-update-takes-effect
+- 清单：SHA256SUMS
+
