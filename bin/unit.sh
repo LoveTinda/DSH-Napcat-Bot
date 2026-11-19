@@ -178,8 +178,13 @@ spawn_chroot() {
         echo "[$name] 挂 /proc 失败" >&2; exit 78; }
       bind_mount /dev "$rf/dev" "nosuid,noexec" || {
         echo "[$name] 挂 /dev 失败" >&2; exit 78; }
-      bind_mount /sys "$rf/sys" "ro,nosuid,nodev,noexec" || {
-        echo "[$name] 挂 /sys（只读）失败" >&2; exit 78; }
+      # /sys 不是必需品：有些内核不允许对 sysfs 的 bind 再做 ro remount，
+      # 硬失败会让整个单元 78（真机日志里就是「挂 /sys（只读）失败」）。
+      # 失败就撤掉半成品挂载、跳过 /sys，让业务继续。
+      if ! bind_mount /sys "$rf/sys" "ro,nosuid,nodev,noexec"; then
+        umount "$rf/sys" 2>/dev/null || true
+        echo "[$name] 警告：/sys 只读挂载失败，已跳过（业务不依赖 /sys）" >&2
+      fi
       # 不挂 /sdcard：桥接/web 不需要；少一个可写外部面。
       bind_mount "$mod" "$rf/opt/tinda-bot" "ro,nosuid,nodev,noexec" || {
         echo "[$name] 挂模块代码失败" >&2; exit 78; }

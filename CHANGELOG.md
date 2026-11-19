@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v0.4.1
+
+真机日志给出的第一条确凿证据：`[web] 挂 /sys（只读）失败`。web 不是「缺 node」，
+而是 `unit.sh` 的 chroot 在给 sysfs 做 bind + ro remount 时被内核拒绝，直接 78。
+
+- **/sys 改为可选**：chroot 里只有内核允许 ro remount 才挂；失败就 `umount` 掉半成品并跳过，
+  打印「警告：/sys 只读挂载失败，已跳过」。`/proc`、`/dev`、模块目录、状态目录仍然必须成功
+- **修正 v0.4.0 的边界**：`run-web.sh` 原来无条件进 proot，会把已经在 chroot 里的 web 再套一层
+  （chroot 里没有 `pm`，proot 探测必然失败 → 78）。现在 `TINDA_RF` 非空表示已在受限 rootfs，
+  直接跑；否则才探测 proot。规则仍是「受限 rootfs 或失败关闭」，宿主 exec 依旧禁止
+- ADR-0012 措辞同步：「只跑 proot」→「只在受限 rootfs（proot/chroot）里跑」
+- 版本：v0.4.1 / versionCode 60
+- 验证：`sh -n` 通过；chroot 分支不再二次进 proot；守卫 0 FAIL / 1 warn
+
 ## v0.4.0
 
 - **业务进程只跑 proot，删掉宿主回退**：宿主是 Android root 域，在那儿跑 node 等于把

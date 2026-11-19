@@ -14,7 +14,10 @@ ensure_dirs
 # DSH App 的 proot 里跑。找不到 proot/rootfs/node 就 78，**不回退宿主 node**。
 # 理由：宿主是 Android root 域，跑 node 意味着把整片 /data 和 root 权限暴露给业务代码；
 # proot 至少只给它 bind 进来的目录。
-if [ "${TINDA_IN_PROOT:-0}" != "1" ]; then
+# 已经在受限 rootfs 里（unit.sh 的 chroot，或上一轮 proot）就直接跑，不再套一层。
+if [ "${TINDA_IN_PROOT:-0}" = "1" ] || [ -n "${TINDA_RF:-}" ]; then
+  :
+else
   . "$MODDIR/bin/lib-proot.sh"
   if ! proot_detect; then
     log error "找不到可用的 DSH proot（PROOT_BIN=$PROOT_BIN，PROOT_ROOTFS=$PROOT_ROOTFS，包=$PROOT_PKG）"
@@ -31,7 +34,7 @@ fi
 
 NODE=/usr/local/bin/node
 [ -x "$NODE" ] || NODE=$(command -v node)
-[ -n "$NODE" ] || { log error "proot 里没有 node（rootfs 缺 /usr/local/bin/node）"; exit 78; }
+[ -n "$NODE" ] || { log error "受限 rootfs 里没有 node（缺 /usr/local/bin/node）"; exit 78; }
 
 TOKEN_FILE="$DATA/secrets/web.token"
 # 空文件也算没有：网关会拒绝空 token 启动，所以这里必须把空文件补成真 token。

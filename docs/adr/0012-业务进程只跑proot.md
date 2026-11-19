@@ -1,6 +1,7 @@
 # ADR-0012：业务进程只跑 proot，不再回退宿主 exec
 
-> 状态：已采纳（v0.4.0）。收紧 ADR-0010：proot 从「bridge 的做法」变成「所有 node 业务的唯一方式」。
+> 状态：已采纳（v0.4.0，v0.4.1 修正边界）。收紧 ADR-0010：node 业务只允许在受限 rootfs
+> （proot 或 unit.sh 的 chroot）里跑，**绝不回退宿主 exec**；不是「只能 proot」。
 
 ## 背景
 
@@ -26,8 +27,10 @@ DSH App 的 proot；v0.3.9 又改成「proot 优先、探测不到退回宿主�
 
 ## 决定
 
-- `run-web.sh` 只允许在 proot 里跑：先探测 `PROOT_BIN` + `PROOT_ROOTFS`，探测不到就
-  `exit 78` 并打印两个变量与包名。
+- `run-web.sh` 只在受限 rootfs 里跑：已经被 `unit.sh` 放进 chroot（`TINDA_RF` 非空）就直接用；
+  否则探测 `PROOT_BIN` + `PROOT_ROOTFS` 进 proot；两者都没有就 `exit 78` 并打印变量与包名。
+- `unit.sh` 的 chroot 里 `/sys` 改为可选：只有内核允许 ro remount 才挂，失败就撤掉并跳过，
+  不再让整个单元 78（真机日志：`[web] 挂 /sys（只读）失败`）。
 - 删除 `WEB_RUNTIME`：没有 host 档，也没有 auto。
 - 宿主侧只剩 `unit.sh`/`supervisor` 这类生命周期脚本；`bridge` 与 `web` 都在 proot 里。
 - 探测结果缓存 `$DATA/run/proot.path`，避免每次启动都调 `pm`（binder，几百毫秒）。
