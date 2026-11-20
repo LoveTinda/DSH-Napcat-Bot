@@ -132,7 +132,9 @@ if (!TOKEN && !ALLOW_NO_TOKEN) {
 const NAPCAT_TOKEN = process.env.NAPCAT_WEBUI_TOKEN || '';
 const UPSTREAMS = {
   '/dsh/': { host: '127.0.0.1', port: Number(process.env.DSH_PORT || 3080), health: '/' },
-  '/bridge/': { host: '127.0.0.1', port: Number(process.env.BRIDGE_PANEL_PORT || 6700), health: '/healthz' },
+  // 桥接面板的端口与 OneBot 入口（6700）不是一回事：forward-ws 模式下没有任何进程监听 6700，
+  // 拿它当上游的结果就是「桥接器明明活着，控制台永远显示不可达」。真实值见 upstreamOf()。
+  '/bridge/': { host: '127.0.0.1', port: Number(process.env.BRIDGE_PANEL_PORT || 6702), health: '/' },
   '/napcat/': { host: '127.0.0.1', port: Number(process.env.NAPCAT_WEBUI_PORT || 6099), health: '/' },
 };
 
@@ -162,7 +164,8 @@ function probe(url) {
 /** 目的：并发探活三个下游，回一个 { bridge, dsh, napcat } 的布尔表。 */
 async function probeAll(res) {
   const out = {};
-  await Promise.all(Object.entries(UPSTREAMS).map(async ([k, v]) => {
+  await Promise.all(Object.keys(UPSTREAMS).map(async (k) => {
+    const v = upstreamOf(k);
     const key = k.replace(/\//g, '');
     out[key] = await probe(`http://${v.host}:${v.port}${v.health}`);
   }));
@@ -284,6 +287,109 @@ const TINDA_MODDIR = process.env.TINDA_MODDIR || '/opt/tinda-bot';
 const STARTED_AT = Date.now();
 let REQ_COUNT = 0;
 
+/**
+ * 目的：算出桥接面板此刻真正在哪个端口。
+ * 为什么不能只看常量：桥接器发现 admin/panel 被上一轮残留实例占着时会顺延到 6703/6704
+ *   （bin/port-fix.mjs）。宿主与 proot 的 /data 实测是两份内容，靠共享文件公布端口在真机上
+ *   靠不住；本机回环探测最稳。
+ *   判据不能只是「端口通了」：6701 是 admin 口（回 JSON 503），必须认「面板本身」——
+ *   页面标题里要有「桥接器面板」。认错了就是把管理口当页面塞进 iframe。
+ * 输入：无（候选 = BRIDGE_PANEL_PORT 或 6702，再补 6700–6710）。
+ * 输出：当前端口（同步读缓存；刷新在后台进行）。
+ * 失败：一个都探不到就保留原值（多半是桥接器真的没起来），不抛错、不影响其它面板。
+ * 副作用：最多 12 次本机 HTTP 探测（每次 400ms 超时），5 秒节流 + 在途去重。
+ */
+const BRIDGE_PORT_FALLBACK = Number(process.env.BRIDGE_PANEL_PORT || 6702);
+const BRIDGE_PORT_CANDIDATES = (() => {
+  const list = [];
+  const push = (p) => { if (Number.isInteger(p) && p > 0 && p < 65536 && !list.includes(p)) list.push(p); };
+  push(BRIDGE_PORT_FALLBACK);
+  for (let p = 6700; p <= 6710; p += 1) push(p);
+  return list;
+})();
+const BRIDGE_PROBE_TTL_MS = 5000;
+let bridgePort = BRIDGE_PORT_FALLBACK;
+let bridgeProbeAt = 0;
+let bridgeProbing = false;
+
+/**
+ * 目的：读一个本机 HTTP 响应（只给探活用）。
+ * 输入：端口、路径、超时毫秒。输出：Promise<{status, body}>；连不上/超时返回 null。
+ * 失败：不抛错。副作用：一次本机 GET。
+ */
+function httpGetLocal(port, urlPath, ms) {
+  return new Promise((resolve) => {
+    // agent:false = 用完就关。全局 agent 默认 keep-alive，探活留下的空连接会让下游
+    // close() 一直等（测试里表现为「所有 PASS 都打印了、进程不退出」）。
+    const req = http.get({ host: '127.0.0.1', port, path: urlPath, timeout: ms, agent: false }, (r) => {
+      let buf = '';
+      r.setEncoding('utf8');
+      r.on('data', (c) => { if (buf.length < 8192) buf += c; });
+      r.on('end', () => resolve({ status: r.statusCode || 0, body: buf }));
+      r.on('error', () => resolve(null));
+    });
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+  });
+}
+
+/**
+ * 目的：探一个端口现在的状态：是不是桥接面板、有没有人在听。
+ * 判据：GET / 是 200 且页面里有「桥接器面板」才算面板——6701 是 admin 口（回 JSON），不会被认错。
+ * 输入：端口。输出：Promise<'panel'|'other'|'down'>。
+ *   连不上/超时 = 'down'（桥接器搬走了，值得去找）；有响应但不是面板 = 'other'（别乱动）。
+ * 失败：不抛错。副作用：一次本机 GET（最多读 8KB）。
+ */
+async function probeBridgePort(port) {
+  const r = await httpGetLocal(port, '/', 400);
+  if (!r) return 'down';
+  return (r.status === 200 && r.body.includes('桥接器面板')) ? 'panel' : 'other';
+}
+
+/**
+ * 目的：刷新桥接面板端口（节流 + 在途去重）。
+ * 输入：force=true 无视节流（启动时用）。输出：无。失败：保留原值，不抛错。
+ * 副作用：本机探测；端口变化时写一行日志。
+ */
+async function refreshBridgePort(force) {
+  if (bridgeProbing) return;
+  const now = Date.now();
+  if (!force && now - bridgeProbeAt < BRIDGE_PROBE_TTL_MS) return;
+  bridgeProbing = true;
+  bridgeProbeAt = now;
+  try {
+    // 配置端口上「有人在听」就不动：是面板就继续用，是别的服务也不擅自改成别的下游
+    // （那会把配置错误悄悄盖掉）。只有没人听——也就是桥接器搬走了——才去扫。
+    if (await probeBridgePort(bridgePort) !== 'down') return;
+    for (const port of BRIDGE_PORT_CANDIDATES) {
+      if (port === bridgePort) continue;
+      if (await probeBridgePort(port) === 'panel') {
+        console.log('[web] 桥接面板端口跟随：' + bridgePort + ' → ' + port + '（候选 ' + BRIDGE_PORT_CANDIDATES.join(',') + '）');
+        bridgePort = port;
+        return;
+      }
+    }
+  } finally {
+    bridgeProbing = false;
+  }
+}
+
+/**
+ * 目的：取某个前缀的上游。
+ * 输入：UPSTREAMS 的键（如 '/bridge/'）。输出：{ host, port, health }；未知前缀返回 undefined。
+ * 失败：无。副作用：桥接那条会顺手触发一次后台端口刷新（不阻塞本次请求）。
+ */
+function upstreamOf(prefix) {
+  const up = UPSTREAMS[prefix];
+  if (!up) return up;
+  if (prefix !== '/bridge/') return up;
+  refreshBridgePort(false).catch(() => {});
+  return { host: up.host, port: bridgePort, health: up.health };
+}
+
+// 启动就探一次：别让用户打开页面时先看到 4 秒「桥接不可达」。
+refreshBridgePort(true).catch(() => {});
+
 function readText(file, max) {
   try { return fs.readFileSync(file, 'utf8').slice(0, max || 65536); } catch { return ''; }
 }
@@ -334,8 +440,8 @@ function tailLog(name, lines) {
 async function moduleData() {
   const prop = moduleProp();
   const tok = readText(path.join(TINDA_DATA, 'secrets', 'web.token'), 128).trim();
-  const ups = await Promise.all(Object.entries(UPSTREAMS).map(async (pair) => {
-    const p = pair[0], v = pair[1];
+  const ups = await Promise.all(Object.keys(UPSTREAMS).map(async (p) => {
+    const v = upstreamOf(p);
     return { path: p, port: v.port, up: await probe('http://' + v.host + ':' + v.port + v.health) };
   }));
   const confFile = path.join(TINDA_DATA, 'etc', 'tinda.conf');
@@ -353,6 +459,8 @@ async function moduleData() {
       uptime: Math.round((Date.now() - STARTED_AT) / 1000),
       node: process.version, rssMB: Math.round(process.memoryUsage().rss / 1048576),
       requests: REQ_COUNT, upstreams: ups,
+      // 配置项 BRIDGE_PANEL_PORT 的面板字段：配置值 + 探到的实际值，对不上时一眼能看出来。
+      bridgePanel: { conf: confValue('BRIDGE_PANEL_PORT', '(默认 6702)'), actual: bridgePort },
       originDsh: ORIGIN_PORTS.dsh, originNapcat: ORIGIN_PORTS.napcat,
       redirect: Number(process.env.WEB_REDIRECT_PORT || 0),
       plain: Number(process.env.WEB_HTTP_PORT || 0)
@@ -501,7 +609,8 @@ async function forward(prefix, subPath, search, req, res, mappedRoot = false) {
 }
 
 function proxyForward(prefix, subPath, search, req, res, mappedRoot = false) {
-  const up = UPSTREAMS[prefix];
+  // 桥接器可能因为端口被占而顺延，这里按运行时真相取上游，不认启动时的常量。
+  const up = upstreamOf(prefix);
   // NapCat 的 WebUI 自带一套 token，和网关的 token 是两回事。
   // 这里自动补上，免得用户打开面板还要手输一次。
   // 只给「页面」请求补：/api/* 是它的接口，多带一个 token 参数会被判成非法登录请求

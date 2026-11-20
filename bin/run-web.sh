@@ -117,9 +117,20 @@ export WEB_HTTP_PORT="$(conf_get WEB_HTTP_PORT 0)"
 # 只有给它们各自的端口才能正常加载。0 = 不开。
 export WEB_DSH_ORIGIN_PORT="$(conf_get WEB_DSH_ORIGIN_PORT 8444)"
 export WEB_NAPCAT_ORIGIN_PORT="$(conf_get WEB_NAPCAT_ORIGIN_PORT 8445)"
-# 桥接面板没有独立配置键：它和桥接器共用监听端口，网关从这里推导上游。
-_BRIDGE_LISTEN="$(conf_get BRIDGE_LISTEN 127.0.0.1:6700)"
-export BRIDGE_PANEL_PORT="$(printf '%s' "$_BRIDGE_LISTEN" | sed 's/.*://')"
+# 桥接面板的端口（app 的 panel.port，默认 6702）。
+# 为什么不能像以前那样从 BRIDGE_LISTEN(6700) 推导：6700 是 OneBot 事件入口，forward-ws 模式下
+# 根本没人监听它，推导出来的上游永远是死的——控制台就一直是「桥接器不可达」。
+# 端口若因残留实例顺延，桥接器会把真实值写进 state/app/endpoints.json，网关按那份文件跟随。
+export BRIDGE_PANEL_PORT="$(conf_get BRIDGE_PANEL_PORT 6702)"
+# 校验：端口必须是 1–65535 的整数；不合法就退回 6702 并留话（配置写错不该让网关起不来）。
+case "$BRIDGE_PANEL_PORT" in
+  ''|*[!0-9]*) log warn "BRIDGE_PANEL_PORT 不是数字（$BRIDGE_PANEL_PORT），改用 6702"; BRIDGE_PANEL_PORT=6702 ;;
+esac
+if [ "$BRIDGE_PANEL_PORT" -lt 1 ] || [ "$BRIDGE_PANEL_PORT" -gt 65535 ]; then
+  log warn "BRIDGE_PANEL_PORT 越界（$BRIDGE_PANEL_PORT），改用 6702"
+  BRIDGE_PANEL_PORT=6702
+fi
+export BRIDGE_PANEL_PORT
 [ -f "$CERT" ] && { export WEB_TLS_CERT="$CERT"; export WEB_TLS_KEY="$KEY"; }
 
 # NapCat 的 WebUI 有自己的一套 token，网关自动带给它，用户不用再手输一次。

@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## v0.7.1（修「桥接器面板永远打不开」）
+
+### 症状
+
+控制台三个点里「桥接」一直是红的，点进去只有「这个面板还没起来 / 桥接器 现在不可达」。
+可实际上桥接器在跑（面板 HTML 200、/state.json 200），日志里也写着「仪表盘 http://127.0.0.1:6704」。
+
+### 根因（两个独立问题叠在一起）
+
+1. **网关把上游指错端口**：`bin/run-web.sh` 用 `BRIDGE_LISTEN`（OneBot 入口，默认 6700）
+   推导 `BRIDGE_PANEL_PORT`。forward-ws 模式下 6700 没有任何进程监听，`/bridge/` 永远 502/超时。
+   面板真正在 6702（`app` 的 `panel.port`）。文档里「面板与 OneBot 共用 6700」是 v0.2.x 的说法。
+2. **端口顺延后没人跟随**：上一轮残留的旧实例一直占着 6701/6702，新实例按 `port-fix.mjs`
+   顺延到 6703/6704，而网关死守常量。更进一步，回收残留进程的 `reap_port` 在真机上是哑的——
+   Android 的 `/proc/net/tcp` 只列出「与读进程同 uid」的 socket，业务进程跑在应用 uid，
+   宿主 root 也看不见，所以「按端口回收」从来没有真正生效过。
+
+### 处理
+
+| 位置 | 改法 |
+| --- | --- |
+| `bin/run-web.sh` | 面板端口改读独立键 `BRIDGE_PANEL_PORT`（默认 6702），不再从 `BRIDGE_LISTEN` 推导 |
+| `units/web/gateway.mjs` | `/bridge/` 上游按「认面板」探测跟随：候选 = 配置值 + 6700–6710，判据是页面标题出现「桥接器面板」（6701 是 admin 口，回 JSON，不会被误认）；**只在配置端口没人监听时才扫**，有响应但不是面板就保持不动；5 秒节流、启动先探一次；探活用 `agent:false`，不留空连接 |
+| `units/bridge/unit.conf` | `HEALTH_PORT` 6700 → 6702；`EXTRA_PORTS` 补 6700/6703/6704 |
+| `bin/unit.sh` | 新增 `reap_unit_procs`：按 `TINDA_NAME` 环境变量认人并回收残留进程（stop 与 start 前各跑一次），不再依赖那条哑掉的端口路径 |
+
+### 验证
+
+- 临时实例（端口 9443，`BRIDGE_PANEL_PORT=6705` 故意指空）启动即自动跟到 6702：
+  `/_/status` → `{"bridge":true,"dsh":true,"napcat":false}`；`/bridge/` → 200 `text/html`，
+  含 `桥接器面板`；`/bridge/state.json` → 200 JSON；无 token 仍是 401。
+
 ## v0.7.0（稳定性版本：启动链重写 + 一次代码审计）
 
 ### 启动链的问题

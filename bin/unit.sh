@@ -272,6 +272,8 @@ do_start() {
   # 启动前先清端口：旧实例（proot 里的 node 用 guest 路径，命令行匹配找不到）
   # 会一直占着 6700/6701/6702，新实例一绑就退。这一步不能只在 stop 里做。
   for _port in $HEALTH_PORT ${EXTRA_PORTS:-}; do reap_port "$_port"; done
+  # 端口那条路在真机上是哑的（见 reap_unit_procs 的注释），这里再按环境变量收一遍。
+  reap_unit_procs
 
   # 上次 stop 留下的标记会让新一轮循环立刻退出；启动前清掉。
   rm -f "$PID_FILE.stop"
@@ -458,6 +460,30 @@ reap_port() {
   return 0
 }
 
+# 目的：按 TINDA_NAME 环境变量回收本单元的残留进程。
+# 为什么不能只靠 reap_port：Android 上 /proc/net/tcp 只列出「与读进程同 uid」的 socket，
+# 业务进程跑在应用 uid（宿主 root 也看不见它们的 socket），reap_port 在真机上等于哑的——
+# 旧实例杀不掉、新实例只能顺延端口，一轮轮攒成 6703/6704，网关却还盯着 6702。
+# 这里改成「认环境变量」：spawn 时每个单元都带 TINDA_NAME，读 /proc/<pid>/environ 就能精确认人。
+# 边界：只杀 TINDA_NAME 完全相等的进程；environ 读不到就跳过（宁可不杀，也不误伤别人的进程）。
+reap_unit_procs() {
+  for _d in /proc/[0-9]*; do
+    _pid=${_d#/proc/}
+    [ -n "$_pid" ] || continue
+    [ "$_pid" = "$$" ] && continue
+    [ "$_pid" = "$PPID" ] && continue
+    _tn=$(tr '\0' '\n' < "$_d/environ" 2>/dev/null | sed -n 's/^TINDA_NAME=//p' | head -1)
+    [ "$_tn" = "$NAME" ] || continue
+    _rc=$(pid_cmd "$_pid")
+    case "$_rc" in
+      *proot*|*node*|*unit.sh*|*run-*.sh*)
+        kill -9 "$_pid" 2>/dev/null && log warn "$NAME 回收残留进程 pid=$_pid（TINDA_NAME 匹配）"
+        ;;
+      *) log warn "$NAME 残留进程 pid=$_pid 命令行不认识，跳过：$_rc" ;;
+    esac
+  done
+}
+
 do_stop() {
   _sup=$(cat "$PID_FILE" 2>/dev/null)
   _child=$(cat "$PID_FILE.child" 2>/dev/null)
@@ -497,6 +523,7 @@ do_stop() {
   # 常规杀法靠命令行匹配，proot 里的 node 用 guest 路径（/tmp/tinda-app/...），匹配不到，
   # 旧实例就会一直占着端口。这里按端口再收一遍——真机上「起了但 6700 从不监听」的根因。
   for _port in $HEALTH_PORT ${EXTRA_PORTS:-}; do reap_port "$_port"; done
+  reap_unit_procs
 
   if [ -n "$_left" ]; then
     log error "$NAME 有进程杀不掉：$_left（可能卡在 D 状态，重启手机后可清）"

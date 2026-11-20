@@ -182,7 +182,7 @@ function load(){
     sh("sed -n 's/^AUTO_START=//p' "+DATA+"/etc/tinda.conf 2>/dev/null | tail -1"),
     sh("tail -n 10 "+DATA+"/logs/web.log 2>/dev/null"),
     sh("(ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -q ':3080 ' && echo up || echo down"),
-    sh("(ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -q ':6700 ' && echo up || echo down"),
+    sh("(ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -q ':6702 ' && echo up || echo down"),
     sh("(ss -ltn 2>/dev/null || netstat -ltn 2>/dev/null) | grep -q ':6099 ' && echo up || echo down"),
     sh("openssl x509 -in "+DATA+"/secrets/tls.crt -noout -enddate 2>/dev/null | cut -d= -f2")
   ]).then(function(r){
