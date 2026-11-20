@@ -56,6 +56,15 @@ if [ -d "$MODDIR/units/bridge" ]; then
   echo "桥接器：已发起启动（面板顶部三个点会显示它的状态）"
 fi
 
+# 桥接器的控制台已经镜像到共享存储：起完顺手把尾巴打出来，
+# 成功失败都能当场看到，不用再来回转述。
+sleep 12 2>/dev/null
+_BRIDGE_LOG="$(dirname "$MIRROR_DIR")/Logs/bridge-console.log"
+if [ -f "$_BRIDGE_LOG" ]; then
+  echo "桥接器日志（最后 8 行）："
+  tail -8 "$_BRIDGE_LOG" 2>/dev/null
+fi
+
 PORT=$(conf_get WEB_PORT 8443)
 IP=$(conf_get WEB_LAN_IP "")
 [ -n "$IP" ] || IP=$(/system/bin/ip -4 addr show wlan0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)

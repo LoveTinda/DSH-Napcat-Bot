@@ -26,4 +26,7 @@ else
 fi
 [ -s "$CONF" ] || { echo "[bridge] 配置文件是空的：$CONF" >&2; exit 78; }
 
+# 内部端口自愈：旧实例残留会把 6701/6702 占着，应用会直接退出（真机出现过）。
+"$NODE" /tmp/tinda-bin/port-fix.mjs "$CONF" || echo "[bridge] 端口检查跳过" >&2
+
 exec "$NODE" "$ENTRY" "$CONF"

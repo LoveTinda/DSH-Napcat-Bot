@@ -415,6 +415,45 @@ do_start() {
   fi
 }
 
+# 目的：杀掉「占着本单元端口」的旧进程。命令行匹配找不到的（proot 里跑的 node 命令行是
+#       guest 路径，形如 node /tmp/tinda-app/src/index.js）就靠这一步回收，否则新实例永远
+#       EADDRINUSE 直接退出，表面上就是「启动了但什么都没发生」。
+# 输入：端口号；输出：无；失败：不抛错，读不到 /proc/net/tcp 就跳过。
+# 副作用：kill -9 掉持有该端口的 node/proot 进程（命令行必须像我们自己的东西）。
+reap_port() {
+  _port=$1
+  [ -n "$_port" ] || return 0
+  [ -r /proc/net/tcp ] || return 0
+  _hex=$(printf '%04X' "$_port" 2>/dev/null) || return 0
+  _inodes=$(awk -v pat=":$_hex\$" '$2 ~ pat && $4 == "0A" {print $10}' /proc/net/tcp /proc/net/tcp6 2>/dev/null | sort -u)
+  [ -n "$_inodes" ] || return 0
+  for _d in /proc/[0-9]*; do
+    _rp=${_d#/proc/}
+    [ "$_rp" = "$$" ] && continue
+    for _l in "$_d"/fd/*; do
+      _tgt=$(readlink "$_l" 2>/dev/null) || continue
+      case "$_tgt" in
+        socket:\[*\])
+          _inode=${_tgt#socket:[}
+          _inode=${_inode%]}
+          case " $_inodes " in
+            *" $_inode "*)
+              _rc=$(pid_cmd "$_rp")
+              case "$_rc" in
+                *node*|*proot*|*app-boot*|*run-bridge.sh*)
+                  kill -9 "$_rp" 2>/dev/null && log warn "端口 $_port 被旧进程占着，已回收 pid=$_rp"
+                  ;;
+                *) log warn "端口 $_port 被非本模块进程占着：pid=$_rp cmd=$_rc" ;;
+              esac
+              ;;
+          esac
+          ;;
+      esac
+    done
+  done
+  return 0
+}
+
 do_stop() {
   _sup=$(cat "$PID_FILE" 2>/dev/null)
   _child=$(cat "$PID_FILE.child" 2>/dev/null)
@@ -450,6 +489,11 @@ do_stop() {
     kill -0 "$_p" 2>/dev/null && _left="$_left $_p"
   done
   rm -f "$PID_FILE.stop" "$PID_FILE" "$PID_FILE.child"
+
+  # 常规杀法靠命令行匹配，proot 里的 node 用 guest 路径（/tmp/tinda-app/...），匹配不到，
+  # 旧实例就会一直占着端口。这里按端口再收一遍——真机上「起了但 6700 从不监听」的根因。
+  for _port in $HEALTH_PORT ${EXTRA_PORTS:-}; do reap_port "$_port"; done
+
   if [ -n "$_left" ]; then
     log error "$NAME 有进程杀不掉：$_left（可能卡在 D 状态，重启手机后可清）"
     return 1

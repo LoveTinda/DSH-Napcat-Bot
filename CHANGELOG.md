@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## v0.6.9
+
+**根因找到了，不是配置问题，是端口被僵尸占着。**
+
+我在本机直接跑 `node app/src/index.js` 复现了它的第一句话：
+
+```text
+ERROR [admin] 管理端口 127.0.0.1:6701 已被占用，说明已有桥接器在运行。
+```
+
+再探端口：**6701、6702 都在监听，6700 却没有** —— 上一轮残留的桥接进程只占着内部端口，
+新实例一启动就撞上它、立刻退出。于是每次都是「proot 启动」之后一片沉默。
+
+为什么 `unit.sh stop` 杀不掉它：命令行匹配只认 `units/bridge/` 和 `bin/run-bridge.sh`，
+而 proot 里的 node 命令行是 **guest 路径**（`node /tmp/tinda-app/src/index.js`），一条都不匹配。
+PID 文件里的 supervisor 可能早就没了，进程成了孤儿，永远占着端口。
+
+### 三层修法
+
+1. **按端口回收**（`unit.sh` 新增 `reap_port`）：读 `/proc/net/tcp` 的 LISTEN inode，
+   反查 `/proc/*/fd` 找到持有者，命令行像 node/proot 就 `kill -9`。`stop` 时对
+   `HEALTH_PORT` 与新增的 `EXTRA_PORTS` 各跑一遍。
+2. **内部端口自愈**（`bin/port-fix.mjs`）：`admin`/`panel` 绑不上就顺延到下一个空闲端口
+   （6701→6703、6702→6704），OneBot 的 6700 不动。就算回收失败也能起来。
+3. **控制台镜像**：`run-app-proot.sh` 从第一行起把输出写进
+   `/sdcard/Bridge/Logs/bridge-console.log`；「操作」按钮起完会直接打印最后 8 行。
+
+另外 `units/bridge/unit.conf` 的 `HEALTH_PORT` 从 6701 改成 6700——拿管理口探活会把
+「被僵尸占着」误判成「健康」。
+
+- 版本：v0.6.9 / versionCode 84
+- 验证：`port-fix.mjs` 实测 `6701→6703 / 6702→6704` 且不会撞号；`reap_port` 的 awk
+  匹配用样例数据验证（同端口 ESTABLISHED 不会误判）；`sh -n` / `node --check` 通过。
+
 ## v0.6.8
 
 v0.6.6 装上后日志显示策略「取自共享存储」了，但那一轮之后 bridge **再无一行输出**——

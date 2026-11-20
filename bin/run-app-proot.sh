@@ -10,6 +10,12 @@ MODDIR=${MODDIR:-$(cd "$(dirname "$0")/.." && pwd)}
 . "$MODDIR/bin/lib.sh"
 ensure_dirs
 
+# 控制台双写到共享存储：桥接器的 stdout 原本只进 $DATA/logs/bridge.log（root 才能读），
+# 出了事外面只看得到「proot 启动」然后一片沉默。从第一行起就落到能读的位置。
+BRIDGE_CONSOLE="$(dirname "$MIRROR_DIR")/Logs/bridge-console.log"
+printf '\n===== %s 启动 bridge（%s）=====\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)" >> "$BRIDGE_CONSOLE" 2>/dev/null
+exec >> "$BRIDGE_CONSOLE" 2>&1
+
 # 宿主 node 只用来生成 app.json；没有也不拦（真机 root 下通常没有）。
 NODE="$MODDIR/bin/node"; [ -x "$NODE" ] || NODE=$(command -v node)
 
