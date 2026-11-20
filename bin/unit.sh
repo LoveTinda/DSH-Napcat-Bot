@@ -472,6 +472,9 @@ reap_unit_procs() {
     [ -n "$_pid" ] || continue
     [ "$_pid" = "$$" ] && continue
     [ "$_pid" = "$PPID" ] && continue
+    # 进程随时可能消失：先判可读再重定向，否则 shell 会在 tr 之前就打一行
+    # 「cannot open /proc/<pid>/environ」——全是噪音，还盖住真正的回收日志。
+    [ -r "$_d/environ" ] || continue
     _tn=$(tr '\0' '\n' < "$_d/environ" 2>/dev/null | sed -n 's/^TINDA_NAME=//p' | head -1)
     [ "$_tn" = "$NAME" ] || continue
     _rc=$(pid_cmd "$_pid")

@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v0.7.2（排障工具与文档跟上 0.7.1 的端口真相）
+
+v0.7.1 把「面板在 6702、OneBot 入口在 6700」在网关上修对了，但 `doctor.sh` 和几份文档
+还停在「面板与 OneBot 共用 6700」，照它排查会得到一条假报警。
+
+- `bin/doctor.sh`：面板探活与面板数据改用 `BRIDGE_PANEL_PORT`（默认 6702）；回环检查的措辞
+  分清「OneBot 入口」与「面板」。
+- `bin/unit.sh`：`reap_unit_procs` 重定向前先判 `/proc/<pid>/environ` 可读——进程随时会消失，
+  否则 shell 会先打一行 cannot open…，把真正的回收日志淹掉。
+- 文档：`docs/Bridge面板.md`、`docs/安全模型.md`、`docs/生命周期.md`、`docs/安装-Magisk.md`
+  的端口表与命令示例改成 6702 / 6701 / 6700 三分法。
+
+验证：`sh -n` 通过；从 `unit.sh` 抽出 `reap_unit_procs` 实跑（造两个带 TINDA_NAME 的进程，
+一个 bridge 一个 web）——bridge 被杀、web 不受影响，日志无噪音。
+
 ## v0.7.1（修「桥接器面板永远打不开」）
 
 ### 症状

@@ -168,7 +168,7 @@ su -c 'tail -50 /data/adb/tinda-bot/logs/module.log'
 ```
 
 - 控制台：`https://<局域网IP>:8443/?k=<WEB_TOKEN>`，token 在 `/data/adb/tinda-bot/secrets/web.token`
-- 桥接面板：控制台里点「桥接器」，或 `http://127.0.0.1:6700/panel/`
+- 桥接面板：控制台里点「桥接器」，或 `http://127.0.0.1:6702/`
 - 都起不来先看 `module.log` 有没有「缺 node」；有就是第 5 节的问题，不是模块坏了
 
 ## 5. 运行时从哪来（刷之前必须决定）

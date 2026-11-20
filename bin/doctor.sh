@@ -95,6 +95,9 @@ fi
 BRIDGE_LISTEN=$(conf_get BRIDGE_LISTEN 127.0.0.1:6700)
 BRIDGE_HOST=$(printf '%s' "$BRIDGE_LISTEN" | sed 's/:.*//')
 BRIDGE_PORT=$(printf '%s' "$BRIDGE_LISTEN" | sed 's/.*://')
+# 面板端口不是 OneBot 入口端口：forward-ws 模式下 6700 没人监听，拿它判断「桥接器在不在」
+# 只会得到一条假报警——控制台那次就是被同一个错假设误导的。
+BRIDGE_PANEL_PORT=$(conf_get BRIDGE_PANEL_PORT 6702)
 NAPCAT_API=$(conf_get NAPCAT_API http://127.0.0.1:3001)
 API_HOST=$(printf '%s' "$NAPCAT_API" | sed -E 's#^[a-z]+://##; s#/.*$##; s#:[0-9]+$##')
 API_PORT=$(printf '%s' "$NAPCAT_API" | sed -E 's#^.*:([0-9]+)/?$#\1#')
@@ -107,7 +110,7 @@ WEB_HTTP_PORT=$(conf_get WEB_HTTP_PORT 0)
 WEB_LAN_IP=$(conf_get WEB_LAN_IP 192.168.1.3)
 
 echo "== 暴露面"
-case "$BRIDGE_HOST" in 127.0.0.1|::1|localhost) ok "桥接器只绑回环（$BRIDGE_LISTEN）" ;; *) bad "桥接器监听 $BRIDGE_LISTEN：面板与 OneBot 入口会暴露到局域网" ;; esac
+case "$BRIDGE_HOST" in 127.0.0.1|::1|localhost) ok "桥接器 OneBot 入口只绑回环（$BRIDGE_LISTEN）" ;; *) bad "桥接器监听 $BRIDGE_LISTEN：OneBot 入口会暴露到局域网" ;; esac
 case "$API_HOST" in 127.0.0.1|::1|localhost) ok "NapCat OneBot API 只绑回环（$NAPCAT_API）" ;; *) warn "NapCat API 不是回环：$NAPCAT_API" ;; esac
 case "$WEB_BIND" in 127.0.0.1|::1|localhost) ok "网关只绑回环（$WEB_BIND）" ;; *) ok "网关对外监听 $WEB_BIND:$WEB_PORT（需要 token）" ;; esac
 if [ -s "$DATA/secrets/web.token" ]; then ok "web.token 非空"; else bad "web.token 为空：网关会拒绝启动"; fi
@@ -165,7 +168,7 @@ check_port() {
 echo "== 端口"
 check_port 127.0.0.1 "$API_PORT" "OneBot HTTP"
 check_port 127.0.0.1 6099 "NapCat WebUI"
-check_port 127.0.0.1 "$BRIDGE_PORT" "桥接器"
+check_port 127.0.0.1 "$BRIDGE_PANEL_PORT" "桥接器面板"
 check_port 127.0.0.1 3080 "DSH"
 check_port 127.0.0.1 "$WEB_PORT" "网关 HTTPS"
 [ "$WEB_DSH_ORIGIN_PORT" != "0" ] && check_port 127.0.0.1 "$WEB_DSH_ORIGIN_PORT" "DSH 根路径端口"
@@ -190,14 +193,14 @@ echo "== 桥接器"
 OUT=$("$NODE" -e '
 fetch(process.argv[1]+"/panel/state.json",{signal:AbortSignal.timeout(4000)})
  .then(async r=>{if(!r.ok)throw new Error("HTTP "+r.status);const j=await r.json();console.log("ok backend="+j.backend+" 收到="+j.counts.incoming+" 成功="+j.counts.ok+" 失败="+j.counts.failed+" 跳过="+j.counts.skipped);})
- .catch(e=>console.log("bad "+e.message))' "http://127.0.0.1:$BRIDGE_PORT" 2>/dev/null)
+ .catch(e=>console.log("bad "+e.message))' "http://127.0.0.1:$BRIDGE_PANEL_PORT" 2>/dev/null)
 case "$OUT" in ok*) ok "$OUT";; *) bad "$OUT";; esac
 
 # 回复策略（①）：能连上就必须能看到策略摘要；未加固要显眼，因为「谁都能用」是最容易被忽略的状态。
 POL=$("$NODE" -e '
 fetch(process.argv[1]+"/panel/state.json",{signal:AbortSignal.timeout(4000)})
  .then(async r=>{const j=await r.json();const p=j.policy||{};console.log(JSON.stringify({hardened:!!p.hardened,summary:p.summary||"",source:p.source||"",errors:p.errors||[],denied:p.deniedTotal||0}));})
- .catch(()=>console.log("null"))' "http://127.0.0.1:$BRIDGE_PORT" 2>/dev/null)
+ .catch(()=>console.log("null"))' "http://127.0.0.1:$BRIDGE_PANEL_PORT" 2>/dev/null)
 echo "== 回复策略"
 if [ "$POL" = "null" ] || [ -z "$POL" ]; then
   warn "读不到策略状态（桥接器没起或版本太旧）"
