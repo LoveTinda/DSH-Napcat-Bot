@@ -767,6 +767,9 @@ function handle(req, res, url) {
       res.end(JSON.stringify({ error: err.message }));
     });
   }
+  // 审计：只给已通过鉴权的请求（上面已经 `if (!authed(...)) return unauthorized(res)`）。
+  // 返回完整 token 是为了「换设备时能直接拿来贴」，代价是同一浏览器里的脚本也读得到；
+  // 面板页没有第三方脚本、且带 no-store，风险可接受。
   if (url.pathname === '/module/token') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
     return res.end(JSON.stringify({ token: currentToken() }));
@@ -784,6 +787,14 @@ function handle(req, res, url) {
   if (!prefix) { res.writeHead(404); return res.end('not found'); }
 
   const subPath = upstreamPath ?? (url.pathname.slice(prefix.length - 1) || '/');
+  // 审计：反代以前把 pathname 原样拼给下游。`/bridge/../../etc/passwd` 这种 dot-segment
+  // 下游若不做规范化就可能越权读文件（我们自己也读不到，但下游在 proot 里权限更大）。
+  // 这里直接拒绝，不做「猜着修」——正常前端不会发这种路径。
+  if (/\.\.|%2e%2e|\\|\0/i.test(subPath) || subPath.includes('//')) {
+    console.error('[web] 拒绝可疑路径：' + subPath.slice(0, 120));
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    return res.end('路径非法');
+  }
   return forward(prefix, subPath, url.search, req, res);
 };
 

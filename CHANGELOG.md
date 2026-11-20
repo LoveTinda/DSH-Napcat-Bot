@@ -1,5 +1,40 @@
 # CHANGELOG
 
+## v0.7.0（稳定性版本：启动链重写 + 一次代码审计）
+
+### 启动链的问题
+
+一条启动链五层（`unit.sh` → `run-app-proot.sh` → `proot-run.sh` → `app-boot` → node），
+任何一层失败都只表现为「proot 启动」之后沉默。这十几轮就是被这个结构反复拖回去的。
+
+### 重写后的样子
+
+- **一层一件事，每层都留话**：
+  - `unit.sh start`：先按端口回收旧进程（`/proc/net/tcp` inode → `/proc/*/fd` → `kill -9`），
+    再起；不再假定「命令行能匹配上」。
+  - `run-app-proot.sh`：开头先写一行带版本的横幅、做**预检**（app/、bin/、proot、node 逐条），
+    失败直接写明缺哪个；控制台从第一行起镜像到 `/sdcard/Bridge/Logs/bridge-console.log`，
+    镜像目录写不进去就退到 `$DATA/logs`，绝不让重定向失败把脚本弄哑。
+  - **策略随环境变量走**（`TINDA_POLICY_JSON`），文件复制只当锦上添花。此前 `-b` 与 `cp`
+    都在真机上出过事，就不能再赌文件系统。
+  - `app-boot`：生成配置 → 端口自愈 → **策略自检**（白名单为空直接 78，并写清该改哪个文件）。
+- **端口自愈**（v0.6.9 起）：`admin`/`panel` 绑不上就顺延，OneBot 的 6700 不动。
+
+### 代码审计（本轮实际改了 2 处）
+
+| 位置 | 问题 | 处理 |
+| --- | --- | --- |
+| `units/web/gateway.mjs` 反代 | pathname 原样拼给下游，`/bridge/..%2f..%2f…` 这类编码穿越可被下游当作相对路径解析 | 拦 `..`、`%2e%2e`、反斜杠、NUL、双斜杠 → 400；补 4 条回归用例 |
+| `bin/app-config.mjs` | 策略文件读不到时白名单变空 → 应用 fail-closed，且没有任何提示 | 增加 `TINDA_POLICY_JSON` 兜底，并打印改用环境变量的警告 |
+
+审计过但**没有**问题的点：cookie 只存 token 且 HttpOnly、常量时间比较、`?k=` 不落 URL/HTML、
+反代去网关 cookie、上游 4xx/5xx 透传、心跳与看门狗、`/__info` 不含 token 本体、
+`reap_port` 只杀命令行像 node/proot 的进程。
+
+- 版本：v0.7.0 / versionCode 85
+- 验证：网关用例 **47 条 × HTTP/HTTPS 两轮全过**（新增穿越 4 条、token 权威语义 2 条）；
+  `sh -n` / `node --check` 通过；四道门禁 0 FAIL。
+
 ## v0.6.9
 
 **根因找到了，不是配置问题，是端口被僵尸占着。**

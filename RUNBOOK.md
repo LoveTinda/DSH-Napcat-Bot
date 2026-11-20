@@ -262,7 +262,8 @@ git clone /sdcard/backup/tinda-bot-<版本>-<时间>/repo.bundle ~/tinda-restore
 | 控制台 401 | 先开 `https://<IP>:8443/__info` 看 `tokenFp` | token 和网关认的不是同一份。把 `__info` 的 `tokenFp` 和 `action.sh` 打印的指纹一比：不同就看 `tokenFiles` 里哪份文件在起作用、mtime 是什么 |
 | 控制台一直弹 token / 一直「验证中…」 | `/__info` 能否打开；`/sdcard/Bridge/Logs/web-console.log` 有没有那一行访问日志 | 输入框现在会直接显示「服务器要 xxxx、你输入的是 yyyy」；一直转圈说明请求没被响应，看访问日志里有没有这条请求、状态码是多少 |
 | 偶发 `ERR_CONNECTION_RESET` | `/__info` 的 `keepAliveMs` 应为 65000 | 旧版本没设 keep-alive（node 默认 5 秒关空闲连接，浏览器正好复用时收到 RST）；升级到 v0.6.3+ |
-| 桥接面板 502 | `unit.sh status bridge` / `logs bridge` | 网关的 `BRIDGE_PANEL_PORT` 是从 `BRIDGE_LISTEN` 推导的；桥接器没起或端口不一致 |
+| 桥接面板 502 | 先看 `/sdcard/Bridge/Logs/bridge-console.log`（v0.7.0 起桥接器控制台全量镜像） | 网关的 `BRIDGE_PANEL_PORT` 是从 `BRIDGE_LISTEN` 推导的；桥接器没起或端口不一致 |
+| 桥接器「起了但 6700 不监听」 | `bridge-console.log` 里有没有 `管理端口已被占用` / `白名单为空` | 两种老毛病：① 旧实例占着 6701/6702（proot 里的 node 命令行是 guest 路径，旧版 stop 匹配不到）→ v0.7.0 起按端口回收 + 内部端口顺延；② 白名单为空 → 应用 fail-closed，检查 `/sdcard/Bridge/bridge-policy.json` 的 `allowUsers` |
 | 桥接面板能开但数字不动 | 浏览器控制台 Network | 页面取的是相对 `state.json`；确认 `/bridge/state.json` 返回 200，不是 401/404 |
 | 面板一片空白 | 浏览器开 8445 直接访问 | 前端写死绝对路径 `/webui/assets`、`/api/…`，必须走独立端口 |
 | NapCat 面板登录失败 | `POST /api/auth/login` 的 `hash` | `hash = sha256(token + ".napcat")`（读它前端 bundle 得到的，不是猜的）。网关现在自己登录并把 Credential 写进应用层引导页，浏览器地址栏不出现 token |

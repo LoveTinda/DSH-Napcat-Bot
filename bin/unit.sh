@@ -269,6 +269,10 @@ do_start() {
     log warn "$NAME 有未登记的进程：$(printf '%s' "$_stray" | tr '\n' ' ')，先 unit.sh stop $NAME"
     return 1
   fi
+  # 启动前先清端口：旧实例（proot 里的 node 用 guest 路径，命令行匹配找不到）
+  # 会一直占着 6700/6701/6702，新实例一绑就退。这一步不能只在 stop 里做。
+  for _port in $HEALTH_PORT ${EXTRA_PORTS:-}; do reap_port "$_port"; done
+
   # 上次 stop 留下的标记会让新一轮循环立刻退出；启动前清掉。
   rm -f "$PID_FILE.stop"
   # 长跑进程不会自己轮转日志；每次启动前检查一次，避免日志无限增长。

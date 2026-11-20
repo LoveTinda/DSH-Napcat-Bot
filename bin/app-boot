@@ -29,4 +29,17 @@ fi
 # 内部端口自愈：旧实例残留会把 6701/6702 占着，应用会直接退出（真机出现过）。
 "$NODE" /tmp/tinda-bin/port-fix.mjs "$CONF" || echo "[bridge] 端口检查跳过" >&2
 
+# 最后一道自检：把生效的策略打出来。白名单为空就是「起来了也不回话」，
+# 这里直接判失败，让 unit.sh 的重启/退避有明确理由，而不是让应用静默退出。
+"$NODE" -e '
+const fs = require("fs");
+const c = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+const p = c.policy || {};
+const u = Array.isArray(p.allowUsers) ? p.allowUsers : [];
+const g = Array.isArray(p.allowGroups) ? p.allowGroups : [];
+console.log("[bridge] 生效策略：私聊=" + (p.privateChat || "?") + " 群聊=" + (p.groupChat || "?") +
+  " 用户白名单=" + u.length + " 群白名单=" + g.length + " allowAllUsers=" + (p.allowAllUsers === true));
+if (!u.length && p.allowAllUsers !== true) { console.error("[bridge] 白名单为空 → 拒绝启动（填 /sdcard/Bridge/bridge-policy.json 的 allowUsers）"); process.exit(2); }
+' "$CONF" || { echo "[bridge] 策略自检未通过，退出"; exit 78; }
+
 exec "$NODE" "$ENTRY" "$CONF"

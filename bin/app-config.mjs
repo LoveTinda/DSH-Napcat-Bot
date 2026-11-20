@@ -18,8 +18,28 @@ const cfg = JSON.parse(fs.readFileSync(template, 'utf8'));
 
 // 从当前 bridge 的白名单里取真实 QQ；占位文案/空值不抄。
 const qqList = (v) => (Array.isArray(v) ? v.map(String).filter((x) => /^\d{5,12}$/.test(x)) : []);
+/** 目的：读策略——先读文件，读不到再用 TINDA_POLICY_JSON（宿主随环境传进来的那份）。 */
+function loadPolicy(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    if (err && err.code !== 'ENOENT') console.error('warn 读取策略失败：' + err.message);
+  }
+  const inline = process.env.TINDA_POLICY_JSON;
+  if (inline) {
+    try {
+      const p = JSON.parse(inline);
+      console.error('warn 策略文件不可读，改用环境变量里的策略');
+      return p;
+    } catch (err) {
+      console.error('warn 环境变量里的策略不是合法 JSON：' + err.message);
+    }
+  }
+  return null;
+}
+
 try {
-  const p = JSON.parse(fs.readFileSync(policyFile, 'utf8'));
+  const p = loadPolicy(policyFile);
   if (p && typeof p === 'object') {
     cfg.policy = cfg.policy || {};
     for (const k of ['privateChat', 'groupChat', 'allowAllUsers', 'allowAllGroups', 'ignoreSelf']) {

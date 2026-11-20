@@ -13,8 +13,26 @@ ensure_dirs
 # 控制台双写到共享存储：桥接器的 stdout 原本只进 $DATA/logs/bridge.log（root 才能读），
 # 出了事外面只看得到「proot 启动」然后一片沉默。从第一行起就落到能读的位置。
 BRIDGE_CONSOLE="$(dirname "$MIRROR_DIR")/Logs/bridge-console.log"
-printf '\n===== %s 启动 bridge（%s）=====\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)" >> "$BRIDGE_CONSOLE" 2>/dev/null
+mkdir -p "$(dirname "$BRIDGE_CONSOLE")" 2>/dev/null
+if ! printf '\n===== %s 启动 bridge（%s）=====\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -1)" >> "$BRIDGE_CONSOLE" 2>/dev/null; then
+  # 共享存储不可写时退到自己的日志里，绝不让重定向失败把整个脚本弄哑。
+  BRIDGE_CONSOLE="$DATA/logs/bridge-console.log"
+  mkdir -p "$DATA/logs" 2>/dev/null
+fi
 exec >> "$BRIDGE_CONSOLE" 2>&1
+
+# 预检：把「能不能起」的每个前提逐条写清楚。以前任何一条不满足都只表现为
+# 「proot 启动」之后一片沉默，只能靠反复猜。
+_preflight() {
+  _bad=0
+  [ -f "$MODDIR/app/src/index.js" ] || { echo "预检失败：缺 $MODDIR/app/src/index.js"; _bad=1; }
+  [ -f "$MODDIR/bin/app-boot" ] || { echo "预检失败：缺 $MODDIR/bin/app-boot"; _bad=1; }
+  [ -f "$MODDIR/bin/port-fix.mjs" ] || { echo "预检失败：缺 $MODDIR/bin/port-fix.mjs"; _bad=1; }
+  [ -x "$PROOT_BIN" ] || { echo "预检失败：proot 不可执行 $PROOT_BIN"; _bad=1; }
+  [ -x "$ROOTFS/usr/local/bin/node" ] || { echo "预检失败：rootfs 里没有 node"; _bad=1; }
+  [ "$_bad" -eq 0 ] && echo "预检通过：app/ + bin/ + proot + node 都在"
+  return "$_bad"
+}
 
 # 宿主 node 只用来生成 app.json；没有也不拦（真机 root 下通常没有）。
 NODE="$MODDIR/bin/node"; [ -x "$NODE" ] || NODE=$(command -v node)
@@ -157,7 +175,12 @@ cp "$MODDIR/app/config.example.json" "$ROOTFS/tmp/tinda-template.json" 2>/dev/nu
 _policy_src="$SHARED_POLICY"
 [ -s "$_policy_src" ] || _policy_src="$POLICY"
 if [ -s "$_policy_src" ]; then
-  cp "$_policy_src" "$ROOTFS/tmp/tinda-policy.json" 2>/dev/null     || log warn "复制策略到 guest /tmp 失败（会用模板默认值）"
+  # 两条路一起走：文件复制（给 app-config 当路径）+ 环境变量（复制失败也照样生效）。
+  # 真机上 -b 和 cp 都出过事，所以策略内容本身随 env 走，不赌文件系统。
+  cp "$_policy_src" "$ROOTFS/tmp/tinda-policy.json" 2>/dev/null \
+    || log warn "复制策略到 guest /tmp 失败（改用环境变量传递）"
+  TINDA_POLICY_JSON=$(cat "$_policy_src" 2>/dev/null)
+  export TINDA_POLICY_JSON
 else
   log warn "没有可读的策略文件：白名单可能为空，桥接器会拒绝启动"
 fi
